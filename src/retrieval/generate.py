@@ -14,19 +14,22 @@ from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.documents import Document
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langsmith import traceable
 from langsmith.run_helpers import set_tracing_parent
 
 from config.settings import (
+    GEMINI_API_KEY,
     GENERATION_INPUT_PRICE_PER_1M,
     GENERATION_MAX_TOKENS,
     GENERATION_MODEL,
     GENERATION_OUTPUT_PRICE_PER_1M,
+    GENERATION_PROVIDER,
     GENERATION_TEMPERATURE,
 )
 from src.documents import extract_original_data
+from src.llm import create_llm
 from src.logger import get_logger
 from src.retrieval.search import retrieve_chunks
 from src.tracing import summarize_chunks
@@ -168,13 +171,14 @@ def _build_message_content(chunks: list[Document], query: str, max_images: int =
     return content
 
 
-def _create_llm() -> ChatGoogleGenerativeAI:
-    """Create the Gemini LLM instance used for generation."""
-    logger.info("  Using model: %s (max_tokens=%d)", GENERATION_MODEL, GENERATION_MAX_TOKENS)
-    return ChatGoogleGenerativeAI(
-        model=GENERATION_MODEL,
+def _create_llm() -> BaseChatModel:
+    """Create the default chat model configured in ``config/settings.py``."""
+    return create_llm(
+        GENERATION_PROVIDER,
+        GENERATION_MODEL,
+        GEMINI_API_KEY,
         temperature=GENERATION_TEMPERATURE,
-        max_output_tokens=GENERATION_MAX_TOKENS,
+        max_tokens=GENERATION_MAX_TOKENS,
     )
 
 

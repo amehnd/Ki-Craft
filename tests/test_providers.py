@@ -44,3 +44,21 @@ def test_every_model_has_unique_id():
 
 def test_list_models_for_provider():
     assert len(list_models_for_provider("gemini")) > 0
+
+
+def test_openai_compatible_providers_have_an_endpoint():
+    """Only OpenAI itself may rely on the client's default endpoint."""
+    for provider in ALL_PROVIDERS:
+        if provider.protocol == "openai" and provider.id != "openai":
+            assert provider.base_url, provider.id
+
+
+def test_groq_models_that_returned_404_are_gone():
+    removed = {
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "qwen/qwen3.6-27b",
+        "groq/compound",
+        "groq/compound-mini",
+    }
+    assert not removed & {m.id for m in list_models_for_provider("groq")}

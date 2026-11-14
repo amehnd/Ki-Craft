@@ -3,13 +3,13 @@
 They check each endpoint's status codes and response shape, so a change to
 the API layer shows exactly which parts of the HTTP contract it alters.
 
-The real FastAPI app and its lifespan run, but the three heavy things
-``RAGService`` would build are replaced before the app starts:
+The real FastAPI app and its lifespan run, but the heavy things are replaced
+before the app starts:
 
 * the watsonx embedding client and the Chroma store (patched in
   ``api.service``, where ``RAGService._load`` looks them up);
-* the default Gemini client (``src.retrieval.generate._create_llm``);
-* the custom-provider client (``api.custom_service._create_llm_for_model``).
+* the two chat client classes inside ``src/llm.py``. The real ``create_llm``
+  still runs, so its catalogue checks are part of every test.
 
 Guards make any attempt to open the real Chroma store or build a real watsonx
 client fail the test, and LangSmith tracing is switched off, so no test
@@ -27,10 +27,9 @@ from fastapi.testclient import TestClient
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessageChunk
 
-import api.custom_service
 import api.service
 import src.embed
-import src.retrieval.generate
+import src.llm
 import src.retrieval.search
 from api.main import app
 
@@ -103,7 +102,7 @@ class FakeBackend:
         return _FakeStore()
 
     def make_llm(self, *args, **kwargs) -> "_FakeLLM":
-        """Replacement for both LLM builders; ignores provider, model and key."""
+        """Replacement for both chat client classes; ignores model and key."""
         return _FakeLLM(self)
 
 
@@ -141,8 +140,8 @@ def backend(monkeypatch) -> FakeBackend:
     monkeypatch.setattr(api.service, "load_embedding_model", lambda: "fake-embeddings")
     monkeypatch.setattr(api.service, "load_vector_store", fake.load_store)
     monkeypatch.setattr(api.service, "build_retriever", lambda db: db.as_retriever())
-    monkeypatch.setattr(src.retrieval.generate, "_create_llm", fake.make_llm)
-    monkeypatch.setattr(api.custom_service, "_create_llm_for_model", fake.make_llm)
+    monkeypatch.setattr(src.llm, "ChatGoogleGenerativeAI", fake.make_llm)
+    monkeypatch.setattr(src.llm, "ChatOpenAI", fake.make_llm)
     monkeypatch.setattr(src.retrieval.search, "Chroma", _forbidden("Chroma"))
     monkeypatch.setattr(src.embed, "WatsonxEmbeddings", _forbidden("WatsonxEmbeddings"))
 

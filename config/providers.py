@@ -1,14 +1,15 @@
 """Provider and model registry for LLM selection.
 
 Central place to define available providers, their models, and metadata
-(pricing, context window, capabilities).  Used by the dashboard dropdown
-and the backend /query/custom endpoint.
+(pricing, context window, capabilities).  Used by the dashboard dropdown,
+the backend /query/custom endpoint, and the chat model factory in
+``src/llm.py``, which only builds models listed here.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 # ---------------------------------------------------------------------------
 # Provider and model definitions
@@ -25,6 +26,10 @@ class ModelInfo:
     supports_vision: bool = False
     supports_streaming: bool = True
     description: str = ""
+    # False for models that reject a custom temperature (OpenAI o-series) or
+    # ignore it (Gemini fixed-sampling and GPT-5 models); src/llm.py then
+    # leaves it out of the request.
+    accepts_temperature: bool = True
 
 
 @dataclass(frozen=True)
@@ -33,7 +38,10 @@ class ProviderInfo:
     id: str                    # short key: "gemini", "groq", "huggingface", "openai"
     display_name: str          # "Google Gemini", "Groq", "Hugging Face", "OpenAI"
     api_key_env: str           # env var name for default key (e.g. "GEMINI_API_KEY")
-    base_url: str | None = None # custom base URL (for HF router, etc.)
+    # Wire protocol, which picks the LangChain client in src/llm.py: "gemini"
+    # for Google's API, "openai" for any OpenAI-compatible chat API.
+    protocol: Literal["gemini", "openai"]
+    base_url: str | None = None # endpoint for OpenAI-compatible providers; None means OpenAI itself
     models: tuple[ModelInfo, ...] = ()
     description: str = ""
 
@@ -57,6 +65,7 @@ GEMINI_MODELS = (
         output_price_per_1m=7.50,
         supports_vision=True,
         description="Workhorse Flash model with strong multimodal capabilities",
+        accepts_temperature=False,
     ),
     ModelInfo(
         id="gemini-3.5-flash",
@@ -75,6 +84,7 @@ GEMINI_MODELS = (
         output_price_per_1m=2.50,
         supports_vision=True,
         description="Most cost-effective 3.5 generation model for high-volume tasks",
+        accepts_temperature=False,
     ),
     ModelInfo(
         id="gemini-3.1-pro-preview",
@@ -132,24 +142,8 @@ GEMINI_MODELS = (
     ),
 )
 
-# ---- Groq (all available models from API) ----
+# ---- Groq (models confirmed to answer on 2026-11-13) ----
 GROQ_MODELS = (
-    ModelInfo(
-        id="llama-3.3-70b-versatile",
-        display_name="Llama 3.3 70B Versatile",
-        context_window=131_072,
-        input_price_per_1m=0.59,
-        output_price_per_1m=0.79,
-        description="280 T/s — flagship open-weight reasoning",
-    ),
-    ModelInfo(
-        id="llama-3.1-8b-instant",
-        display_name="Llama 3.1 8B Instant",
-        context_window=131_072,
-        input_price_per_1m=0.05,
-        output_price_per_1m=0.08,
-        description="560 T/s — fast, cheapest Llama",
-    ),
     ModelInfo(
         id="openai/gpt-oss-120b",
         display_name="OpenAI GPT OSS 120B",
@@ -167,14 +161,6 @@ GROQ_MODELS = (
         description="1000 T/s — fastest OpenAI model on Groq",
     ),
     ModelInfo(
-        id="qwen/qwen3.6-27b",
-        display_name="Qwen 3.6 27B",
-        context_window=131_072,
-        input_price_per_1m=0.30,
-        output_price_per_1m=0.30,
-        description="Multilingual and coding model",
-    ),
-    ModelInfo(
         id="qwen/qwen3.8-27b",
         display_name="Qwen 3.8 27B",
         context_window=131_042,
@@ -189,22 +175,6 @@ GROQ_MODELS = (
         input_price_per_1m=0.10,
         output_price_per_1m=0.10,
         description="Arabic-focused model",
-    ),
-    ModelInfo(
-        id="groq/compound",
-        display_name="Groq Compound",
-        context_window=131_072,
-        input_price_per_1m=0.50,
-        output_price_per_1m=0.50,
-        description="Compound model for multi-step reasoning",
-    ),
-    ModelInfo(
-        id="groq/compound-mini",
-        display_name="Groq Compound Mini",
-        context_window=131_072,
-        input_price_per_1m=0.10,
-        output_price_per_1m=0.10,
-        description="Lightweight compound model",
     ),
 )
 
@@ -296,6 +266,7 @@ OPENAI_MODELS = (
         input_price_per_1m=15.00,
         output_price_per_1m=60.00,
         description="Complex reasoning, math, multi-step problems",
+        accepts_temperature=False,
     ),
     ModelInfo(
         id="o1-mini",
@@ -304,6 +275,7 @@ OPENAI_MODELS = (
         input_price_per_1m=3.00,
         output_price_per_1m=12.00,
         description="STEM reasoning at lower cost than o1",
+        accepts_temperature=False,
     ),
     ModelInfo(
         id="o3-mini",
@@ -312,6 +284,7 @@ OPENAI_MODELS = (
         input_price_per_1m=1.10,
         output_price_per_1m=4.40,
         description="Cost-effective reasoning model",
+        accepts_temperature=False,
     ),
     ModelInfo(
         id="gpt-4.1",
@@ -339,6 +312,7 @@ OPENAI_MODELS = (
         output_price_per_1m=15.00,
         supports_vision=True,
         description="Newest GPT-5 series flagship",
+        accepts_temperature=False,
     ),
     ModelInfo(
         id="gpt-5.4-mini",
@@ -348,6 +322,7 @@ OPENAI_MODELS = (
         output_price_per_1m=4.50,
         supports_vision=True,
         description="Cost-efficient GPT-5 variant",
+        accepts_temperature=False,
     ),
     ModelInfo(
         id="gpt-5.4-nano",
@@ -356,6 +331,7 @@ OPENAI_MODELS = (
         input_price_per_1m=0.20,
         output_price_per_1m=1.25,
         description="Ultra-cheap GPT-5 variant",
+        accepts_temperature=False,
     ),
 )
 
@@ -365,6 +341,7 @@ ALL_PROVIDERS: tuple[ProviderInfo, ...] = (
         id="gemini",
         display_name="Google Gemini",
         api_key_env="GEMINI_API_KEY",
+        protocol="gemini",
         models=GEMINI_MODELS,
         description="Google's multimodal models with 1M context, free tier available",
     ),
@@ -372,6 +349,8 @@ ALL_PROVIDERS: tuple[ProviderInfo, ...] = (
         id="groq",
         display_name="Groq",
         api_key_env="GROQ_API_KEY",
+        protocol="openai",
+        base_url="https://api.groq.com/openai/v1",
         models=GROQ_MODELS,
         description="Ultra-fast LPU inference for open-weight models (Llama, Mixtral, Gemma)",
     ),
@@ -379,6 +358,7 @@ ALL_PROVIDERS: tuple[ProviderInfo, ...] = (
         id="huggingface",
         display_name="Hugging Face (Inference Providers)",
         api_key_env="HF_TOKEN",
+        protocol="openai",
         base_url="https://router.huggingface.co/v1",
         models=HF_MODELS,
         description="OpenAI-compatible router to 15+ providers (Groq, Together, Fireworks, etc.)",
@@ -387,6 +367,7 @@ ALL_PROVIDERS: tuple[ProviderInfo, ...] = (
         id="openai",
         display_name="OpenAI",
         api_key_env="OPENAI_API_KEY",
+        protocol="openai",
         models=OPENAI_MODELS,
         description="Proprietary frontier models (GPT-4o, o1, GPT-5 series)",
     ),

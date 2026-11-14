@@ -207,7 +207,7 @@ For datasheets, hybrid search is the most valuable addition, because questions c
 
 ## 7. Generation
 
-**Today:** Gemini 3.5 Flash-Lite at temperature 0 through `langchain-google-genai`. The prompt contains chunk text, tables as HTML, and images as base64 `image_url` blocks (`src/retrieval/generate.py`). `/query/custom` lets the caller pick another provider and model with their own API key (`config/providers.py`).
+**Today:** Gemini 3.5 Flash-Lite through `langchain-google-genai`. It uses fixed sampling, so no temperature is sent and answers can vary slightly between runs. The prompt contains chunk text, tables as HTML, and images as base64 `image_url` blocks (`src/retrieval/generate.py`). `/query/custom` lets the caller pick another provider and model with their own API key (`config/providers.py`). Both paths build their client with `create_llm` in `src/llm.py`.
 
 | Option | Strengths | Weaknesses |
 |---|---|---|

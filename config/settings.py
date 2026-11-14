@@ -39,7 +39,9 @@ EMBEDDING_MAX_INPUT_TOKENS: int = 512
 ENHANCEMENT_MODEL: str = "zai-org/GLM-4.5V"
 # Router endpoint that serves the enhancement model via the OpenAI protocol.
 ENHANCEMENT_BASE_URL: str = "https://router.huggingface.co/v1"
-# Text generation model used to answer retrieval queries.
+# Default provider and model used to answer retrieval queries.  Both must be
+# listed in config/providers.py; the API key is GEMINI_API_KEY.
+GENERATION_PROVIDER: str = "gemini"
 GENERATION_MODEL: str = "gemini-3.5-flash-lite"
 
 # ---------------------------------------------------------------------------
@@ -58,6 +60,9 @@ RETRIEVAL_SEARCH_TYPE: str = "mmr"
 # ---------------------------------------------------------------------------
 # Generation settings
 # ---------------------------------------------------------------------------
+# Sent only to models whose catalogue entry accepts a temperature.  The
+# default model (gemini-3.5-flash-lite) uses fixed sampling, so this value
+# does not reach it.
 GENERATION_TEMPERATURE: float = 0.0
 
 # Maximum output tokens for the generation model.  Limits cost and prevents

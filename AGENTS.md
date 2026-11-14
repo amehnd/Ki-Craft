@@ -88,6 +88,7 @@ The owner wants depth here. At each hop, also explain from first principles what
 config/settings.py      every tunable and environment variable
 config/providers.py     catalogue of LLM providers and models for /query/custom
 src/embed.py            the one embedding factory (IBM watsonx Granite, 768 dims)
+src/llm.py              the one chat model factory: catalogue entry -> LangChain client
 src/ingestion/          offline pipeline: PDF -> elements -> chunks -> summaries -> Chroma
   extract.py              unstructured partition_pdf (hi_res, tables, images)
   chunk.py                chunk_by_title
@@ -212,7 +213,7 @@ Each checkpoint is a set of small commits. Finish one, let the owner test and pu
 - Replace `_create_llm_for_model` in `api/custom_service.py` with a factory in `src/` that chooses the client by provider id, not by model-name prefix. Every provider's `base_url` lives in `config/providers.py`, including Groq's. An unknown provider is rejected instead of silently going to Groq.
 - Prune the model catalogue. On 2026-11-13, 5 of the 9 Groq models listed (`llama-3.3-70b-versatile`, `llama-3.1-8b-instant`, `qwen/qwen3.6-27b`, `groq/compound`, `groq/compound-mini`) returned 404 for the owner's key. Consider checking against each provider's `/models` endpoint.
 - Replace the `thinking` prompt instruction with each provider's native reasoning control (Groq `reasoning_effort`). Reasoning models spend output tokens on reasoning, so the default `max_tokens` of 512 can cut answers short.
-- The o-series OpenAI models accept only their default temperature, so do not send `temperature=0` to them.
+- Send `temperature` only to models that accept it. OpenAI's o-series reject a custom value, and Gemini's fixed-sampling models (`gemini-3.5-flash-lite`, `gemini-3.6-flash`) and GPT-5 ignore it. Recorded per model as `accepts_temperature` in `config/providers.py` (2026-11-15).
 - Return the figures the model actually saw. Add `figures` to the `/v1/query` response (and the `done` stream event): the image URLs sent in the prompt, in prompt order, each with its chunk and source document. Label each image in the prompt (`Figure F1, from <document>, chunk <n>`) so the model can cite `[F1]`. This is the baseline for citations; see Later phases for highlighted text.
 
 **Checkpoint 3. Pipeline readability and known bugs.**

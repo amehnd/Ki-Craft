@@ -16,8 +16,8 @@ from langchain_core.messages import HumanMessage
 from langsmith import traceable
 from langsmith.run_helpers import set_tracing_parent
 
-from config.providers import get_model
 from src.documents import extract_original_data
+from src.llm import create_llm
 from src.logger import get_logger
 from src.retrieval.generate import (
     _build_message_content,
@@ -32,47 +32,6 @@ if TYPE_CHECKING:
     from api.service import RAGService
 
 logger = get_logger(__name__)
-
-
-def _create_llm_for_model(provider_id: str, model_id: str, api_key: str, temperature: float = 0.0, max_tokens: int = 512, thinking: bool = False):
-    """Create a LangChain chat model instance for the given provider/model."""
-
-    if model_id.startswith("gemini") or model_id.startswith("models/gemini"):
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        return ChatGoogleGenerativeAI(
-            model=model_id,
-            temperature=temperature,
-            max_output_tokens=max_tokens,
-            google_api_key=api_key,
-        )
-    elif model_id.startswith("gpt-") or model_id.startswith("o1") or model_id.startswith("o3") or model_id.startswith("gpt-5"):
-        from langchain_openai import ChatOpenAI
-        return ChatOpenAI(
-            model=model_id,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            api_key=api_key,
-        )
-    else:
-        from langchain_openai import ChatOpenAI
-        if provider_id == "huggingface":
-            base_url = "https://router.huggingface.co/v1"
-        else:
-            base_url = "https://api.groq.com/openai/v1"
-
-        extra: dict = {}
-        # Groq supports reasoning_effort to control thinking natively
-        if provider_id == "groq":
-            extra["reasoning_effort"] = "default" if thinking else "none"
-
-        return ChatOpenAI(
-            model=model_id,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            api_key=api_key,
-            base_url=base_url,
-            model_kwargs=extra,
-        )
 
 
 def _extract_text(content: Any) -> str:
@@ -229,14 +188,20 @@ async def run_custom_query(
         A tuple of ``(answer, retrieve_response_dict, usage_dict)``.
 
     Raises:
-        ValueError: If ``model_id`` is not registered for ``provider_id``.
+        ValueError: If the provider or model is not in the catalogue. Raised
+            before the vector store loads, so a typo fails fast.
     """
-    if not get_model(provider_id, model_id):
-        raise ValueError(f"Model {model_id} not found for provider {provider_id}")
+    llm = create_llm(
+        provider_id,
+        model_id,
+        api_key,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        thinking=thinking,
+    )
 
     await service.ensure_ready()
     retriever = service.get_retriever(top_k)
-    llm = _create_llm_for_model(provider_id, model_id, api_key, temperature, max_tokens, thinking)
 
     def _run() -> tuple[str, list, dict]:
         stream = answer_query_stream_custom(retriever, query, llm, model_id, max_images=max_images, thinking=thinking)

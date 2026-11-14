@@ -42,7 +42,7 @@ class _FakeService:
 
 
 def test_custom_query_reuses_shared_service(monkeypatch):
-    monkeypatch.setattr(custom, "_create_llm_for_model", lambda *a, **k: "llm")
+    monkeypatch.setattr(custom, "create_llm", lambda *a, **k: "llm")
     monkeypatch.setattr(custom, "answer_query_stream_custom", lambda *a, **k: _FakeStream())
     service = _FakeService()
 
