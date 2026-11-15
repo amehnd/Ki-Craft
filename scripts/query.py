@@ -40,8 +40,9 @@ def main() -> None:
         return
 
     print("\n" + "-" * 5)
-    for token in answer_query_stream(retriever, query, default_llm(), GENERATION_MODEL):
-        print(token, end="", flush=True)
+    for kind, value in answer_query_stream(retriever, query, default_llm(), GENERATION_MODEL):
+        if kind == "token":
+            print(value, end="", flush=True)
     print()
 
 

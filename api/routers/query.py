@@ -121,27 +121,26 @@ async def query_stream(
 
     def generate():
         try:
-            stream = service.stream_answer(query, top_k, max_images)
-            chunks = stream.chunks
-            base = service.to_retrieve_response(query, chunks)
-            yield _sse("retrieval", base.model_dump())
-
             collected: list[str] = []
-            for token in stream:
-                collected.append(token)
-                yield _sse("token", {"delta": token})
-
-            answer = "".join(collected)
-            yield _sse(
-                "done",
-                {
-                    "answer": answer,
-                    "answer_characters": len(answer),
-                    "response_id": base.response_id,
-                    "num_chunks": base.num_chunks,
-                    "usage": stream.usage,
-                },
-            )
+            for kind, value in service.stream_answer(query, top_k, max_images):
+                if kind == "chunks":
+                    base = service.to_retrieve_response(query, value)
+                    yield _sse("retrieval", base.model_dump())
+                elif kind == "token":
+                    collected.append(value)
+                    yield _sse("token", {"delta": value})
+                else:
+                    answer = "".join(collected)
+                    yield _sse(
+                        "done",
+                        {
+                            "answer": answer,
+                            "answer_characters": len(answer),
+                            "response_id": base.response_id,
+                            "num_chunks": base.num_chunks,
+                            "usage": value,
+                        },
+                    )
         except Exception as exc:
             yield _sse("error", {"message": str(exc)})
 

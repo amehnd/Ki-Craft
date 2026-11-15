@@ -402,7 +402,7 @@ Rules that make it safe for datasheets:
 
 ## 12. Observability
 
-**Today:** LangSmith tracing on generation, with chunk summaries and images attached to runs (`src/tracing.py`). Logs go to stdout and `logs/pipeline.log`.
+**Today:** LangSmith tracing on generation, with chunk summaries and images attached to runs (`src/tracing.py`). Each query is one trace: `AnswerQuery` (inputs: the question; output: the answer and usage; metadata: the model) with `RetrieveChunks` and `GenerateAnswerStream` under it, and LangChain's model run, which carries tokens and cost, under that. The traced functions are generators, so each run lasts as long as the stream (fixed 2026-11-15; before, runs closed before the first token and recorded a stream object as output). Logs go to stdout and `logs/pipeline.log`.
 
 LangSmith is good for inspecting single requests. It does not replace an evaluation set or request logs in the database. Keep it, keep it optional (tracing off when no key is set), and stop writing debug files such as `last_prompt.txt` from the request path.
 

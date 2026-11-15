@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import base64
 import time
+from collections.abc import Iterator
 from typing import Any
 
 from langchain_core.documents import Document
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langsmith import traceable
-from langsmith.run_helpers import set_tracing_parent
 
 from config.settings import (
     GEMINI_API_KEY,
@@ -36,6 +36,10 @@ from src.retrieval.search import retrieve_chunks
 from src.tracing import summarize_chunks
 
 logger = get_logger(__name__)
+
+# One item from answer_query_stream: ("chunks", list[Document]),
+# ("token", str) or ("usage", dict).
+StreamEvent = tuple[str, Any]
 
 
 def _capture_usage(obj: Any, usage: dict[str, Any]) -> None:
@@ -224,39 +228,27 @@ def _trace_inputs(inputs: dict) -> dict:
     return recorded
 
 
-class _StreamWrapper:
-    """Iterator adapter that keeps the LangSmith parent context alive.
+def _answer_output(tokens: list[str]) -> dict:
+    """Turn the tokens a generation run yielded into its recorded output."""
+    return {"answer": "".join(tokens)}
 
-    ``generate_answer_stream`` is a generator, so LangSmith defers creating
-    its trace run until the first ``next()`` call.  By the time that happens
-    the original parent context (inside ``answer_query_stream``) is gone, so
-    we re-activate it around every ``next()`` to keep retrieval + generation
-    nested under the same ``AnswerQuery`` root run.
 
-    ``usage`` is a shared mutable dict that the streaming generator fills in
-    as it runs, so it is populated once the stream is fully consumed.
+def _query_output(events: list[StreamEvent]) -> dict:
+    """Turn the events a query run yielded into its recorded output.
+
+    The chunks are left out: the nested ``RetrieveChunks`` run records them.
     """
-
-    def __init__(self, gen, chunks: list[Document], parent=None, usage: dict | None = None):
-        self._gen = gen
-        self.chunks = chunks
-        self._parent = parent
-        self.usage: dict[str, Any] = usage if usage is not None else {}
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        if self._parent is not None:
-            with set_tracing_parent(self._parent):
-                return next(self._gen)
-        return next(self._gen)
+    return {
+        "answer": "".join(value for kind, value in events if kind == "token"),
+        "usage": next((value for kind, value in events if kind == "usage"), {}),
+    }
 
 
 @traceable(
     run_type="chain",
     name="AnswerQuery",
     process_inputs=_trace_inputs,
+    reduce_fn=_query_output,
     dangerously_allow_filesystem=True,
 )
 def answer_query_stream(
@@ -268,12 +260,14 @@ def answer_query_stream(
     max_images: int = GENERATION_MAX_IMAGES,
     thinking: bool = False,
     run_tree=None,
-) -> _StreamWrapper:
+) -> Iterator[StreamEvent]:
     """Retrieve chunks then stream an answer under a single LangSmith trace.
 
     This is the one generation path: the default model and a user-chosen
     model both come through here, differing only in the ``llm`` passed in.
-    ``run_tree`` is injected by LangSmith.
+    It is a generator, so LangSmith keeps the ``AnswerQuery`` run open until
+    the last event and records the full answer as its output. ``run_tree`` is
+    injected by LangSmith.
 
     Args:
         retriever: Vector store retriever.
@@ -283,34 +277,37 @@ def answer_query_stream(
         max_images: Most images to send to the model (0 = all).
         thinking: Ask the model to show its reasoning in the prompt.
 
-    Returns:
-        An iterator of answer token strings. Its ``chunks`` attribute holds
-        the retrieved chunks at once; ``usage`` is filled as the stream is
-        consumed.
+    Yields:
+        ``("chunks", list[Document])`` once, as soon as retrieval finishes;
+        then ``("token", str)`` for each piece of the answer; then
+        ``("usage", dict)`` once, with token counts, latency and prompt size.
     """
     if run_tree is not None:
         run_tree.add_metadata({"model": model_id})
     chunks = retrieve_chunks(retriever, query)
     _attach_images_to_trace(run_tree, chunks)
+    yield "chunks", chunks
 
     usage: dict[str, Any] = {}
-    return _StreamWrapper(
-        generate_answer_stream(
-            chunks,
-            query,
-            llm,
-            model_id,
-            usage=usage,
-            max_images=max_images,
-            thinking=thinking,
-        ),
+    for token in generate_answer_stream(
         chunks,
-        run_tree,
+        query,
+        llm,
+        model_id,
         usage=usage,
-    )
+        max_images=max_images,
+        thinking=thinking,
+    ):
+        yield "token", token
+    yield "usage", usage
 
 
-@traceable(run_type="llm", name="GenerateAnswerStream", process_inputs=_trace_inputs)
+@traceable(
+    run_type="chain",
+    name="GenerateAnswerStream",
+    process_inputs=_trace_inputs,
+    reduce_fn=_answer_output,
+)
 def generate_answer_stream(
     chunks: list[Document],
     query: str,
@@ -320,8 +317,12 @@ def generate_answer_stream(
     usage: dict[str, Any] | None = None,
     max_images: int = GENERATION_MAX_IMAGES,
     thinking: bool = False,
-):
+) -> Iterator[str]:
     """Stream an answer from ``llm`` for already retrieved chunks.
+
+    Traced as a ``chain`` run that stays open until the last token. The model
+    call itself appears under it as LangChain's own ``llm`` run, which carries
+    the provider, model name and token counts.
 
     Args:
         chunks: Retrieved document chunks.
@@ -340,61 +341,58 @@ def generate_answer_stream(
     if usage is None:
         usage = {}
 
-    def _generate():
-        try:
-            chunk_summaries = summarize_chunks(chunks)
-            total_images = sum(c.get("image_count", 0) for c in chunk_summaries)
-            total_tables = sum(c.get("table_count", 0) for c in chunk_summaries)
+    try:
+        chunk_summaries = summarize_chunks(chunks)
+        total_images = sum(c.get("image_count", 0) for c in chunk_summaries)
+        total_tables = sum(c.get("table_count", 0) for c in chunk_summaries)
 
-            logger.info("  %d chunks received by generation", len(chunks))
-            for ci, c in enumerate(chunks):
-                od = extract_original_data(c)
-                logger.debug(
-                    "    Chunk %d: summary=%d chars, tables=%d, images=%d",
-                    ci + 1,
-                    len(c.page_content or ""),
-                    len(od["tables_html"]),
-                    len(od["images_base64"]),
-                )
-
-            message_content = _build_message_content(chunks, query, max_images)
-            if thinking:
-                message_content[0]["text"] += (
-                    "\n\nBefore answering, show your reasoning step-by-step "
-                    "wrapped in <think> and <think> tags. "
-                    "Then provide your final answer after the </think> tag."
-                )
-
-            prompt_chars, prompt_images = _prompt_stats(message_content)
-            usage.update(
-                {
-                    "model": model_id,
-                    "prompt_chars": prompt_chars,
-                    "prompt_images": prompt_images,
-                    "chunks_used": len(chunks),
-                }
+        logger.info("  %d chunks received by generation", len(chunks))
+        for ci, c in enumerate(chunks):
+            od = extract_original_data(c)
+            logger.debug(
+                "    Chunk %d: summary=%d chars, tables=%d, images=%d",
+                ci + 1,
+                len(c.page_content or ""),
+                len(od["tables_html"]),
+                len(od["images_base64"]),
             )
 
-            logger.info(
-                "LangSmith trace: %d chunks, %d images, %d tables",
-                len(chunks),
-                total_images,
-                total_tables,
+        message_content = _build_message_content(chunks, query, max_images)
+        if thinking:
+            message_content[0]["text"] += (
+                "\n\nBefore answering, show your reasoning step-by-step "
+                "wrapped in <think> and <think> tags. "
+                "Then provide your final answer after the </think> tag."
             )
 
-            message = HumanMessage(content=message_content)
-            start = time.perf_counter()
-            for chunk in llm.stream([message]):
-                token_text = _extract_text(chunk.content)
-                if token_text:
-                    yield token_text
-                _capture_usage(chunk, usage)
-            usage["latency_ms"] = round((time.perf_counter() - start) * 1000, 1)
-            usage["estimated_cost_usd"] = _estimate_cost(usage)
+        prompt_chars, prompt_images = _prompt_stats(message_content)
+        usage.update(
+            {
+                "model": model_id,
+                "prompt_chars": prompt_chars,
+                "prompt_images": prompt_images,
+                "chunks_used": len(chunks),
+            }
+        )
 
-        except Exception as e:
-            logger.warning("Answer generation failed: %s", e)
-            usage["error"] = str(e)
-            yield f"Sorry, could not complete response due to: {e}"
+        logger.info(
+            "LangSmith trace: %d chunks, %d images, %d tables",
+            len(chunks),
+            total_images,
+            total_tables,
+        )
 
-    return _generate()
+        message = HumanMessage(content=message_content)
+        start = time.perf_counter()
+        for chunk in llm.stream([message]):
+            token_text = _extract_text(chunk.content)
+            if token_text:
+                yield token_text
+            _capture_usage(chunk, usage)
+        usage["latency_ms"] = round((time.perf_counter() - start) * 1000, 1)
+        usage["estimated_cost_usd"] = _estimate_cost(usage)
+
+    except Exception as e:
+        logger.warning("Answer generation failed: %s", e)
+        usage["error"] = str(e)
+        yield f"Sorry, could not complete response due to: {e}"

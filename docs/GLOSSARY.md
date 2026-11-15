@@ -36,9 +36,13 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **OpenAI-compatible API.** A provider that accepts the same HTTP requests as OpenAI's chat API at its own address. Groq and the Hugging Face router are, so one client (`ChatOpenAI` with a different `base_url`) serves all three. The provider's `protocol` field records this.
 
-**Generator.** A Python function that contains `yield`. Calling it runs nothing; it returns an iterator, and each `next()` runs the body up to the next `yield` and hands back that value. Here `generate_answer_stream` yields answer tokens one at a time, so the API can forward each token as soon as the model produces it.
+**Generator.** A Python function that contains `yield`. Calling it runs nothing; it returns an iterator, and each `next()` runs the body up to the next `yield` and hands back that value. Here `generate_answer_stream` yields answer tokens one at a time, so the API can forward each token as soon as the model produces it, and `answer_query_stream` yields events: the chunks first, then tokens, then usage.
 
-**LangSmith trace (run).** LangSmith records each call to a function decorated with `@traceable` as a run, with its inputs, outputs and timing; runs started inside another run nest under it, and the whole tree is one trace. Here every query is one `AnswerQuery` run with `RetrieveChunks` and `GenerateAnswerStream` under it. `src/tracing.py`, `src/retrieval/generate.py`.
+**LangSmith trace (run).** LangSmith records each call to a function decorated with `@traceable` as a run, with its inputs, outputs and timing; runs started inside another run nest under it, and the whole tree is one trace. Here every query is one `AnswerQuery` run with `RetrieveChunks` and `GenerateAnswerStream` under it, and LangChain's own model run (for example `ChatGoogleGenerativeAI`, with tokens and cost) under that. When the decorated function is a generator, the run stays open until the last item and `reduce_fn` turns the yielded items into its output. `src/tracing.py`, `src/retrieval/generate.py`.
+
+**Run type.** The kind LangSmith files a run under: `chain` for a step of our own, `retriever` for retrieval, `llm` for a model call. Only `llm` runs get model, token and cost columns, so only the real model call (LangChain's run) uses it here.
+
+**reduce_fn.** An argument to `@traceable` for generator functions: it receives everything the generator yielded and returns what the run records as its output. Here it joins the tokens into the answer.
 
 **Factory.** A function whose job is to build and configure an object, so callers ask for what they need instead of assembling it. Here `src/embed.py` builds the embedding client and `src/llm.py` builds chat clients.
 

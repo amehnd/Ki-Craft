@@ -14,6 +14,7 @@ Every query, with the default model or a caller-chosen one, goes through
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -21,7 +22,7 @@ from config.settings import GENERATION_MAX_IMAGES, GENERATION_MODEL, RETRIEVAL_K
 from src.documents import extract_original_data
 from src.embed import load_embedding_model
 from src.logger import get_logger
-from src.retrieval.generate import answer_query_stream, default_llm
+from src.retrieval.generate import StreamEvent, answer_query_stream, default_llm
 from src.retrieval.search import build_retriever, load_vector_store, retrieve_chunks
 
 from api.images import ImageRegistry
@@ -84,8 +85,8 @@ class RAGService:
         llm: BaseChatModel | None = None,
         model_id: str | None = None,
         thinking: bool = False,
-    ):
-        """Retrieve chunks and return the answer as a token stream.
+    ) -> Iterator[StreamEvent]:
+        """Retrieve chunks and return the answer as a stream of events.
 
         Blocking: call it from a worker thread, after ``ensure_ready``. This is
         the one place that picks the default model when no ``llm`` is given.
@@ -101,8 +102,9 @@ class RAGService:
             thinking: Ask the model to show its reasoning.
 
         Returns:
-            The iterator from ``answer_query_stream``: it yields tokens and
-            exposes ``chunks`` and ``usage``.
+            The generator from ``answer_query_stream``: ``("chunks", ...)``,
+            then ``("token", ...)`` per answer piece, then ``("usage", ...)``.
+            Nothing runs until it is iterated.
         """
         if llm is None:
             llm, model_id = default_llm(), GENERATION_MODEL
@@ -126,7 +128,7 @@ class RAGService:
     ) -> tuple[str, RetrieveResponse, dict]:
         """Retrieve chunks and generate a full answer.
 
-        Consumes every token from :meth:`stream_answer`, so the arguments are
+        Consumes every event from :meth:`stream_answer`, so the arguments are
         the same and retrieval and generation stay under a single trace.
 
         Returns:
@@ -136,9 +138,17 @@ class RAGService:
         await self.ensure_ready()
 
         def _run() -> tuple[str, list, dict]:
-            stream = self.stream_answer(query, top_k, max_images, llm, model_id, thinking)
-            answer = "".join(stream)
-            return answer, stream.chunks, stream.usage
+            chunks: list = []
+            tokens: list[str] = []
+            usage: dict = {}
+            for kind, value in self.stream_answer(query, top_k, max_images, llm, model_id, thinking):
+                if kind == "chunks":
+                    chunks = value
+                elif kind == "token":
+                    tokens.append(value)
+                else:
+                    usage = value
+            return "".join(tokens), chunks, usage
 
         answer, chunks, usage = await asyncio.to_thread(_run)
         return answer, self.to_retrieve_response(query, chunks), usage
