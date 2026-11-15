@@ -252,7 +252,7 @@ The default and custom-provider paths are one function that receives an LLM obje
 | Stable image URLs `/v1/images/{record_id}/{position}`, served straight from disk | Cacheable, survive restarts, work across replicas; deletes `ImageRegistry` and its memory growth | Breaking for clients that stored old URLs |
 | One `POST /query` with an optional `llm: {provider, model, api_key}` object, replacing `/query` and `/query/custom` | One code path to explain and test; the default LLM is used when `llm` is absent | Breaking for `/query/custom` callers |
 | `POST /query/stream` with the same body as `/query` | Long questions and options do not belong in a URL (logs, length limits); one schema for both | Browser `EventSource` supports only GET, so clients read the stream with `fetch` or `httpx` |
-| Real HTTP errors: 422 for bad input, 404 for unknown images or models, 502 when the LLM provider fails, 503 when the store is not ready | Clients and monitoring can tell failure from an answer; the UI can show the reason | The UI must handle error codes |
+| Real HTTP errors: 422 for bad input or an unknown model, 404 for unknown images, 502 when the LLM provider fails, 503 when the store is not ready | Clients and monitoring can tell failure from an answer; the UI can show the reason | The UI must handle error codes |
 
 The API key in the `llm` object travels in the request body over HTTPS. It must never be logged or stored, and it must never appear in traces.
 

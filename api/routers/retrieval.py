@@ -1,4 +1,6 @@
-"""Retrieve-only endpoint: the chunks for a question, with no generated answer."""
+"""Retrieve-only endpoint: ``POST /v1/retrieve`` returns the chunks for a
+question, with no generated answer.
+"""
 
 from __future__ import annotations
 

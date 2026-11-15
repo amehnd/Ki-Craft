@@ -7,7 +7,7 @@ Running them opens the real Chroma store, which rewrites tracked files under
 ``dbv2/chroma_db``. Restore them afterwards with
 ``git checkout -- dbv2/chroma_db``.
 
-Each run makes one Gemini call (``/query`` with ``max_images=1``) and a few
+Each run makes one Gemini call (``/v1/query`` with ``max_images=1``) and a few
 watsonx embedding calls.
 """
 
@@ -48,7 +48,7 @@ def test_health(live_client):
 
 
 def test_retrieve_returns_chunks(live_client):
-    response = live_client.post("/retrieve", json={"query": _FIGURE_QUESTION, "top_k": 5})
+    response = live_client.post("/v1/retrieve", json={"query": _FIGURE_QUESTION, "top_k": 5})
     assert response.status_code == 200
     body = response.json()
     assert body["num_chunks"] > 0
@@ -57,7 +57,7 @@ def test_retrieve_returns_chunks(live_client):
 
 def test_query_returns_answer(live_client):
     response = live_client.post(
-        "/query", json={"query": _FIGURE_QUESTION, "top_k": 3, "max_images": 1}
+        "/v1/query", json={"query": _FIGURE_QUESTION, "top_k": 3, "max_images": 1}
     )
     # A provider failure is a 502 whose detail says why.
     assert response.status_code == 200, response.json().get("detail")
@@ -65,7 +65,7 @@ def test_query_returns_answer(live_client):
 
 
 def test_figure_loads(live_client):
-    body = live_client.post("/retrieve", json={"query": _FIGURE_QUESTION, "top_k": 10}).json()
+    body = live_client.post("/v1/retrieve", json={"query": _FIGURE_QUESTION, "top_k": 10}).json()
     urls = [url for chunk in body["chunks"] for url in chunk["image_urls"]]
     assert urls, "no retrieved chunk had a figure; pick a more visual question"
 

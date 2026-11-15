@@ -216,7 +216,7 @@ class RAGService:
                     image_count=len(images),
                     images_base64=images,
                     image_urls=[
-                        f"/images/{response_id}/{starts[i] + j}" for j in range(len(images))
+                        f"/v1/images/{response_id}/{starts[i] + j}" for j in range(len(images))
                     ],
                     has_table=bool(tables),
                     has_image=bool(images),

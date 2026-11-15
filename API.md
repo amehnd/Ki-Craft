@@ -12,6 +12,10 @@ supporting evidence: the exact document chunks, their tables, and their figures.
 - Interactive docs: `GET /docs` (Swagger UI) — try every endpoint in the browser.
 - Base URL: `http://localhost:8000` locally. In production, use the deployed URL
   (e.g. `https://your-app.up.railway.app`). Everything below is relative to it.
+- Versioning: every endpoint is under `/v1` except `/` and `/health`, which stay
+  unversioned so uptime probes keep a fixed URL. A breaking change would go to
+  `/v2` while `/v1` keeps working. The old unprefixed paths (`/query`,
+  `/retrieve`, ...) were removed on 2026-11-15 and return 404.
 
 ---
 
@@ -21,10 +25,10 @@ supporting evidence: the exact document chunks, their tables, and their figures.
 |---|---|---|---|
 | `/` | GET | Index / endpoint list | `{name, version, endpoints}` |
 | `/health` | GET | Is the service up? | `{status: "ok", vector_store: "loaded"}`, or **503** when the store cannot load |
-| `/retrieve` | POST | Get evidence **without** an answer | `RetrieveResponse` |
-| `/query` | POST | Get evidence **and** a full answer | `QueryResponse` |
-| `/query/stream` | GET | Same as `/query` but token-by-token (SSE) | Server-Sent Events |
-| `/images/{response_id}/{index}` | GET | Fetch one figure as an image | raw JPEG bytes |
+| `/v1/retrieve` | POST | Get evidence **without** an answer | `RetrieveResponse` |
+| `/v1/query` | POST | Get evidence **and** a full answer | `QueryResponse` |
+| `/v1/query/stream` | GET | Same as `/v1/query` but token-by-token (SSE) | Server-Sent Events |
+| `/v1/images/{response_id}/{index}` | GET | Fetch one figure as an image | raw JPEG bytes |
 | `/docs` | GET | Swagger UI (try-it-out docs) | HTML |
 
 There are only **three shapes** you need to understand:
@@ -40,7 +44,7 @@ answer. Every error body has the same shape: `{"detail": "..."}`.
 
 | Status | Meaning | Example `detail` |
 |---|---|---|
-| `422` | The body is invalid (FastAPI's own check, `detail` is a list), or `/query/custom` named a provider or model that is not in the catalogue | `"Model gpt-9 not found for provider openai"` |
+| `422` | The body is invalid (FastAPI's own check, `detail` is a list), or `/v1/query/custom` named a provider or model that is not in the catalogue | `"Model gpt-9 not found for provider openai"` |
 | `500` | Unexpected server error; the real message is only in the server log | `"Internal server error"` |
 | `502` | The model provider failed (bad key, quota, timeout), or it returned no answer text | `"The model provider failed: ..."`, or `"The model used its whole output budget (512 tokens, reasoning included) before writing any answer text. Raise max_tokens and try again."` |
 | `503` | The vector store could not be loaded | `"Vector store unavailable: ..."` |
@@ -52,7 +56,7 @@ so an uptime probe can rely on the status code alone.
 
 ## 2. The request
 
-Both `/retrieve` and `/query` take the same JSON body:
+Both `/v1/retrieve` and `/v1/query` take the same JSON body:
 
 ```json
 {
@@ -74,7 +78,7 @@ Start with the defaults; raise `top_k` if answers miss context, and raise
 
 ## 3. The response — what comes back
 
-This is what `POST /query` returns (identical top-level shape for `/retrieve`,
+This is what `POST /v1/query` returns (identical top-level shape for `/v1/retrieve`,
 minus the two `answer` fields):
 
 ```jsonc
@@ -84,8 +88,8 @@ minus the two `answer` fields):
   "total_images": 3,               // sum of image_count across chunks
   "total_tables": 2,               // sum of tables across chunks
   "response_id": "79c107621a50474989f2c3eab59beb7a",  // key for image URLs
-  "answer": "The LM317 is an adjustable linear voltage regulator...",  // /query only
-  "answer_characters": 1086,       // /query only
+  "answer": "The LM317 is an adjustable linear voltage regulator...",  // /v1/query only
+  "answer_characters": 1086,       // /v1/query only
   "chunks": [
     {
       "chunk_id": 1,               // 1-based position within this response
@@ -94,8 +98,8 @@ minus the two `answer` fields):
       "tables_html": ["<table><tr><th>Pin</th><th>Name</th>...</table>"],
       "image_count": 2,
       "images_base64": ["/9j/4AAQSkZJRg==...", "/9j/4AAQSkZJRg==..."],
-      "image_urls": ["/images/79c107621a50474989f2c3eab59beb7a/0",
-                     "/images/79c107621a50474989f2c3eab59beb7a/1"],
+      "image_urls": ["/v1/images/79c107621a50474989f2c3eab59beb7a/0",
+                     "/v1/images/79c107621a50474989f2c3eab59beb7a/1"],
       "has_table": true,
       "has_image": true,
       "source": "lm317_datasheet.pdf",
@@ -128,8 +132,8 @@ Every figure exists in **two formats**:
    ```
    Pros: works forever, no extra request, no server state. Cons: big JSON payloads.
 
-2. **HTTP URL** — `image_urls[i]`, e.g. `/images/79c10.../1`. Fetch it with
-   `GET {base}/images/79c10.../1` and you get **raw JPEG bytes**
+2. **HTTP URL** — `image_urls[i]`, e.g. `/v1/images/79c10.../1`. Fetch it with
+   `GET {base}/v1/images/79c10.../1` and you get **raw JPEG bytes**
    (`Content-Type: image/jpeg`). Use it directly in `<img src>`:
    ```js
    `<img src="${base}${chunk.image_urls[i]}">`
@@ -141,15 +145,15 @@ the data around, URLs when you want clean, lightweight JSON.
 
 ---
 
-## 4. Streaming the answer (`/query/stream`)
+## 4. Streaming the answer (`/v1/query/stream`)
 
-`GET /query/stream?query=...&top_k=5` is the same as `/query` but the answer
+`GET /v1/query/stream?query=...&top_k=5` is the same as `/v1/query` but the answer
 arrives as you type it. It's a standard **Server-Sent Events** stream
 (`Content-Type: text/event-stream`), so in the browser you can use
 `EventSource` directly — no library needed.
 
 Because it's a GET, put the parameters in the **query string** and URL-encode:
-`/query/stream?query=Tell%20me%20about%20the%20pin%20configuration%20of%20the%20LM317.`
+`/v1/query/stream?query=Tell%20me%20about%20the%20pin%20configuration%20of%20the%20LM317.`
 
 Event flow, in order:
 
@@ -162,7 +166,7 @@ Event flow, in order:
 
 ```js
 const es = new EventSource(
-  `${BASE}/query/stream?query=${encodeURIComponent("Tell me about the pin configuration of the LM317.")}&top_k=5`
+  `${BASE}/v1/query/stream?query=${encodeURIComponent("Tell me about the pin configuration of the LM317.")}&top_k=5`
 );
 es.addEventListener("retrieval", (e) => renderChunks(JSON.parse(e.data)));
 es.addEventListener("token", (e) => appendToAnswer(JSON.parse(e.data).delta));
@@ -186,7 +190,7 @@ will wait for the first token, so early provider failures become a real 502.)
 const BASE = "http://localhost:8000"; // or your deployed URL
 
 async function ask(query, top_k = 10) {
-  const res = await fetch(`${BASE}/query`, {
+  const res = await fetch(`${BASE}/v1/query`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, top_k }),
@@ -209,7 +213,7 @@ for (const chunk of data.chunks) {
 ```
 
 **Always call `absolutize` on `image_urls`** — they are returned as relative
-paths (`/images/...`) and must be prefixed with the base URL before a browser
+paths (`/v1/images/...`) and must be prefixed with the base URL before a browser
 can load them.
 
 ---
@@ -217,14 +221,14 @@ can load them.
 ## 6. Dependencies & gotchas (read this)
 
 - **`response_id` ties everything together.** Every chunk's `image_urls` is
-  `/images/{response_id}/{index}`. The `index` is the figure's **global,
+  `/v1/images/{response_id}/{index}`. The `index` is the figure's **global,
   0-based position across the whole response** — NOT per-chunk. Chunk 2's
   images start where chunk 1's ended. You never compute this yourself: each
   chunk's `image_urls` array is already the correct list for that chunk. Just
   take it as-is.
 
 - **Image URLs expire.** The backend keeps figures in memory for ~30 minutes
-  (`response_id` lives in a TTL cache). After that, `GET /images/{id}/{index}`
+  (`response_id` lives in a TTL cache). After that, `GET /v1/images/{id}/{index}`
   returns `404 Not Found`. This is by design (memory management) — if you must
   keep images around longer, use `images_base64` instead, or re-run the query.
 
@@ -242,7 +246,7 @@ can load them.
 - **`tables_html` is raw HTML.** The strings come straight from the PDF
   parser. If you inject them with `innerHTML`, sanitise them first.
 
-- **Streaming and the chunks arrive separately.** In `/query/stream`, the
+- **Streaming and the chunks arrive separately.** In `/v1/query/stream`, the
   `retrieval` event contains the chunks; the answer tokens follow. If you want
   both in one place, combine the `retrieval` event's data with the `done`
   event's `answer`.
@@ -270,8 +274,8 @@ can load them.
 
 | You want… | Use |
 |---|---|
-| A ready-to-display answer + evidence | `POST /query` |
-| Evidence only (build your own answer elsewhere) | `POST /retrieve` |
-| A typewriter/streaming answer effect | `GET /query/stream` |
-| The figures of a response | `images_base64` (inline) or `image_urls` → `GET /images/...` |
+| A ready-to-display answer + evidence | `POST /v1/query` |
+| Evidence only (build your own answer elsewhere) | `POST /v1/retrieve` |
+| A typewriter/streaming answer effect | `GET /v1/query/stream` |
+| The figures of a response | `images_base64` (inline) or `image_urls` → `GET /v1/images/...` |
 | Just a health/probe check | `GET /health` |

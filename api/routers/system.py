@@ -22,10 +22,11 @@ def root(request: Request) -> dict:
         "version": request.app.version,
         "docs": "/docs",
         "endpoints": {
-            "POST /retrieve": "Retrieve chunks only (text, tables, images)",
-            "POST /query": "Retrieve chunks and generate a full answer",
-            "GET /query/stream": "SSE stream of the answer with retrieval summary",
-            "GET /images/{response_id}/{index}": "Fetch a single figure as JPEG",
+            "POST /v1/retrieve": "Retrieve chunks only (text, tables, images)",
+            "POST /v1/query": "Retrieve chunks and generate a full answer",
+            "GET /v1/query/stream": "SSE stream of the answer with retrieval summary",
+            "POST /v1/query/custom": "The same answer from a provider and model chosen in the body",
+            "GET /v1/images/{response_id}/{index}": "Fetch a single figure as JPEG",
             "GET /health": "Service health / vector store status",
         },
     }

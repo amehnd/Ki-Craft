@@ -2,7 +2,7 @@
 
 Central place to define available providers, their models, and metadata
 (pricing, context window, capabilities).  Used by the dashboard dropdown,
-the backend /query/custom endpoint, and the chat model factory in
+the backend /v1/query/custom endpoint, and the chat model factory in
 ``src/llm.py``, which only builds models listed here.
 """
 

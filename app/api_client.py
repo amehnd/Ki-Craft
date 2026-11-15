@@ -2,7 +2,7 @@
 
 Lets the Streamlit dashboard talk to the API instead of loading the vector
 store and calling the LLM itself.  Image URLs returned by the backend are
-relative (``/images/{response_id}/{index}``); this client rewrites them to
+relative (``/v1/images/{response_id}/{index}``); this client rewrites them to
 absolute URLs so ``st.image`` can load them directly.
 """
 
@@ -39,7 +39,7 @@ def _raise_for_status(response: requests.Response) -> None:
 
 
 def _absolutize_image_urls(payload: dict[str, Any]) -> dict[str, Any]:
-    """Turn relative ``/images/...`` URLs into absolute backend URLs."""
+    """Turn relative ``/v1/images/...`` URLs into absolute backend URLs."""
     for chunk in payload.get("chunks", []):
         chunk["image_urls"] = [_url(u) for u in chunk.get("image_urls", [])]
     return payload
@@ -60,7 +60,7 @@ def health() -> dict:
 def retrieve(query: str, top_k: int = 5) -> dict:
     """Retrieve chunks only (no answer generation)."""
     response = requests.post(
-        _url("/retrieve"),
+        _url("/v1/retrieve"),
         json={"query": query, "top_k": top_k},
         timeout=_REQUEST_TIMEOUT,
     )
@@ -71,7 +71,7 @@ def retrieve(query: str, top_k: int = 5) -> dict:
 def query(query: str, top_k: int = 5) -> dict:
     """Retrieve chunks and generate the full answer in one call."""
     response = requests.post(
-        _url("/query"),
+        _url("/v1/query"),
         json={"query": query, "top_k": top_k},
         timeout=_REQUEST_TIMEOUT,
     )
@@ -80,13 +80,13 @@ def query(query: str, top_k: int = 5) -> dict:
 
 
 def stream(query: str, top_k: int = 5) -> Iterator[tuple[str, dict]]:
-    """Stream SSE events from ``/query/stream``.
+    """Stream SSE events from ``/v1/query/stream``.
 
     Yields ``(event, data)`` pairs where ``event`` is one of
     ``retrieval``, ``token``, ``done`` or ``error``.
     """
     with requests.get(
-        _url("/query/stream"),
+        _url("/v1/query/stream"),
         params={"query": query, "top_k": top_k},
         stream=True,
         timeout=_REQUEST_TIMEOUT,
@@ -115,9 +115,9 @@ def query_custom(
     max_tokens: int | None = None,
     max_images: int = 3,
 ) -> dict:
-    """Query with a custom provider/model/API key via ``/query/custom``."""
+    """Query with a custom provider/model/API key via ``/v1/query/custom``."""
     response = requests.post(
-        _url("/query/custom"),
+        _url("/v1/query/custom"),
         json={
             "query": query,
             "top_k": top_k,

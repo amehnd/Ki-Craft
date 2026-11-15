@@ -2,7 +2,8 @@
 
 This module only assembles the app: it creates it, adds CORS, sets up the
 lifespan that holds one ``RAGService``, turns errors into HTTP status codes,
-and includes the routers in ``api/routers/``, where the endpoints live.
+and includes the routers in ``api/routers/``, where the endpoints live. The
+routers declare short paths (``/query``); the ``/v1`` prefix is added here.
 
 Run:
     uvicorn api.main:app --reload --port 8000
@@ -78,10 +79,13 @@ async def unexpected_error(request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
+# "/" and "/health" stay unversioned so uptime probes keep a fixed URL; every
+# other endpoint is under /v1, so a later /v2 can change them without breaking
+# existing clients.
 app.include_router(system.router)
-app.include_router(retrieval.router)
-app.include_router(query.router)
-app.include_router(images.router)
+app.include_router(retrieval.router, prefix="/v1")
+app.include_router(query.router, prefix="/v1")
+app.include_router(images.router, prefix="/v1")
 
 
 if __name__ == "__main__":

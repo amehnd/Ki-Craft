@@ -69,7 +69,7 @@ class ChunkPayload(BaseModel):
 
     Images are returned twice so callers can pick: inline base64 for quick
     display, or ``image_urls`` to load each figure over HTTP (the URLs point
-    at ``GET /images/{response_id}/{index}``). The ``index`` is the image's
+    at ``GET /v1/images/{response_id}/{index}``). The ``index`` is the image's
     global position across the whole response (0-based), so a chunk's
     ``image_urls`` list is always the correct list for that chunk.
     """
@@ -84,7 +84,7 @@ class ChunkPayload(BaseModel):
     images_base64: list[str] = Field(default_factory=list, description="Inline base64 images")
     image_urls: list[str] = Field(
         default_factory=list,
-        description="HTTP URLs to fetch each image (see /images/{response_id}/{index})",
+        description="HTTP URLs to fetch each image (see /v1/images/{response_id}/{index})",
     )
     has_table: bool = False
     has_image: bool = False
@@ -113,8 +113,8 @@ class ChunkPayload(BaseModel):
                 "image_count": 2,
                 "images_base64": ["<base64-encoded-jpeg>", "<base64-encoded-jpeg>"],
                 "image_urls": [
-                    "/images/79c107621a50474989f2c3eab59beb7a/0",
-                    "/images/79c107621a50474989f2c3eab59beb7a/1",
+                    "/v1/images/79c107621a50474989f2c3eab59beb7a/0",
+                    "/v1/images/79c107621a50474989f2c3eab59beb7a/1",
                 ],
                 "has_table": True,
                 "has_image": True,
@@ -136,7 +136,7 @@ class RetrieveResponse(BaseModel):
         ...,
         description=(
             "Key for the image URLs. Every image in this response lives at "
-            "/images/{response_id}/{index} with a 0-based global index."
+            "/v1/images/{response_id}/{index} with a 0-based global index."
         ),
     )
     chunks: list[ChunkPayload] = Field(default_factory=list)
@@ -158,8 +158,8 @@ class RetrieveResponse(BaseModel):
                         "image_count": 2,
                         "images_base64": ["<base64-encoded-jpeg>", "<base64-encoded-jpeg>"],
                         "image_urls": [
-                            "/images/79c107621a50474989f2c3eab59beb7a/0",
-                            "/images/79c107621a50474989f2c3eab59beb7a/1",
+                            "/v1/images/79c107621a50474989f2c3eab59beb7a/0",
+                            "/v1/images/79c107621a50474989f2c3eab59beb7a/1",
                         ],
                         "has_table": True,
                         "has_image": True,

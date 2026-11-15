@@ -1,4 +1,6 @@
-"""Figure endpoint: serves one image referenced by a chunk's ``image_urls``."""
+"""Figure endpoint: ``GET /v1/images/{response_id}/{index}`` serves one image
+referenced by a chunk's ``image_urls``.
+"""
 
 from __future__ import annotations
 
@@ -18,7 +20,7 @@ router = APIRouter(tags=["images"])
         "- ``index`` is the **global, 0-based** position of the image across "
         "the whole response (chunk 2 of a 2-image chunk 1 starts at index 2).\n\n"
         "```\n"
-        "GET /images/79c107621a50474989f2c3eab59beb7a/1\n"
+        "GET /v1/images/79c107621a50474989f2c3eab59beb7a/1\n"
         "```\n"
         "Returns the figure as ``image/jpeg``. Entries are cached for 10 "
         "minutes and expire after ~30; expired or unknown ids return 404."

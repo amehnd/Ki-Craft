@@ -1,4 +1,4 @@
-"""In-memory image store backing the ``/images/{response_id}/{index}`` URLs.
+"""In-memory image store backing the ``/v1/images/{response_id}/{index}`` URLs.
 
 Images are decoded from base64 when a response is built and kept in memory
 briefly so HTTP clients can fetch them by URL.  Entries expire after a TTL
@@ -33,7 +33,7 @@ class ImageRegistry:
             images_by_chunk: For each chunk, its list of base64 images.
 
         Returns:
-            The response id to use in ``/images/{response_id}/{index}`` URLs.
+            The response id to use in ``/v1/images/{response_id}/{index}`` URLs.
         """
         with self._lock:
             flat: list[bytes] = []

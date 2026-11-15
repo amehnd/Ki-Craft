@@ -1556,7 +1556,7 @@ def render_chat_page() -> None:
             use_custom = st.session_state.get("use_custom_provider", False)
 
             if use_custom:
-                # Custom provider mode - use /query/custom endpoint
+                # Custom provider mode - use /v1/query/custom endpoint
                 provider = st.session_state.get("llm_provider")
                 model = st.session_state.get("llm_model")
                 custom_model = (st.session_state.get("llm_custom_model") or "").strip()

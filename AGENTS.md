@@ -86,7 +86,7 @@ The owner wants depth here. At each hop, also explain from first principles what
 
 ```
 config/settings.py      every tunable and environment variable
-config/providers.py     catalogue of LLM providers and models for /query/custom
+config/providers.py     catalogue of LLM providers and models for /v1/query/custom
 src/embed.py            the one embedding factory (IBM watsonx Granite, 768 dims)
 src/llm.py              the one chat model factory: catalogue entry -> LangChain client
 src/ingestion/          offline pipeline: PDF -> elements -> chunks -> summaries -> Chroma
@@ -209,7 +209,7 @@ Each checkpoint is a set of small commits. Finish one, let the owner test and pu
 - Split `api/main.py` into `api/routers/system.py`, `retrieval.py`, `query.py`, `images.py`. `main.py` keeps only app creation, CORS, the lifespan, and `include_router` calls. Done 2026-11-14.
 - Merge the default and custom generation paths into one function that receives an LLM. Done 2026-11-15: `api/custom_service.py` and the non-streaming copy are deleted; `RAGService.stream_answer` picks the default model.
 - Remove the hidden 5-chunk limit. Moved here from Checkpoint 3 on 2026-11-14. Decided 2026-11-15: `top_k` is what the model gets (every retrieved chunk's text and tables), default 5 (was 10); figures are capped at an absolute count, `GENERATION_MAX_IMAGES` = 3, taken in chunk order; both are settings a request can override. The search type (`similarity`, `mmr`, `similarity_score_threshold`) and its parameters are settings too. Re-ranking (for example, pool 20 and re-rank to 5) waits until the evaluation results show it is needed. Done 2026-11-15.
-- Apply the agreed API changes, including the `/v1` prefix (see Decisions made). These are breaking, so update `app/api_client.py` and `API.md` in the same checkpoint.
+- Apply the agreed API changes, including the `/v1` prefix (see Decisions made). These are breaking, so update `app/api_client.py` and `API.md` in the same checkpoint. The `/v1` prefix is done (2026-11-15): `api/main.py` adds it when including the retrieval, query and image routers, the old unprefixed paths were removed rather than kept as aliases, and `/` and `/health` stay unversioned.
 - Replace `_create_llm_for_model` in `api/custom_service.py` with a factory in `src/` that chooses the client by provider id, not by model-name prefix. Every provider's `base_url` lives in `config/providers.py`, including Groq's. An unknown provider is rejected instead of silently going to Groq. Done 2026-11-15 (`src/llm.py:create_llm`).
 - Prune the model catalogue. On 2026-11-13, 5 of the 9 Groq models listed (`llama-3.3-70b-versatile`, `llama-3.1-8b-instant`, `qwen/qwen3.6-27b`, `groq/compound`, `groq/compound-mini`) returned 404 for the owner's key. Consider checking against each provider's `/models` endpoint. Done 2026-11-15 (the 5 models removed).
 - Drop the `thinking` option. Done 2026-11-15. It appended "show your reasoning in `<think>` tags" to the prompt, which does not change how a model works, and made `create_llm` send Groq's `reasoning_effort` as `none` or `default` to every Groq model, although Groq GPT-OSS accepts only `low`, `medium`, `high`. The request field, the prompt text, the factory argument, and the dashboard's Thinking Mode checkbox and `<think>` parsing are removed; each provider's default reasoning applies (Gemini 3.5 Flash-Lite defaults to `minimal`). Native reasoning control is deferred. Research kept for when it returns:

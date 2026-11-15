@@ -182,7 +182,20 @@ def _parse_sse(body: str) -> list[tuple[str, dict]]:
 def test_root_lists_endpoints(client):
     body = client.get("/").json()
     assert body["docs"] == "/docs"
-    assert "POST /query" in body["endpoints"]
+    assert "POST /v1/query" in body["endpoints"]
+
+
+def test_api_is_versioned_but_root_and_health_are_not(client):
+    """Every endpoint but ``/`` and ``/health`` moved under ``/v1``; old paths are gone."""
+    assert client.get("/").status_code == 200
+    assert client.get("/health").status_code == 200
+    assert client.get("/v1/health").status_code == 404
+    assert client.post("/retrieve", json={"query": "x"}).status_code == 404
+    assert client.post("/query", json={"query": "x"}).status_code == 404
+    assert client.get("/query/stream", params={"query": "x"}).status_code == 404
+    assert client.get("/images/any-id/0").status_code == 404
+    paths = client.get("/openapi.json").json()["paths"]
+    assert {p for p in paths if not p.startswith("/v1/")} == {"/", "/health"}
 
 
 def test_health_ok(client):
@@ -202,13 +215,13 @@ def test_health_reports_store_failure_as_503(client, backend):
 
 def test_query_with_broken_store_is_503(client, backend):
     backend.store_error = "store missing"
-    response = client.post("/query", json={"query": "LM317 pins"})
+    response = client.post("/v1/query", json={"query": "LM317 pins"})
     assert response.status_code == 503
     assert response.json() == {"detail": "Vector store unavailable: store missing"}
 
 
 def test_retrieve_returns_chunks_with_tables_and_images(client):
-    response = client.post("/retrieve", json={"query": "LM317 pins", "top_k": 2})
+    response = client.post("/v1/retrieve", json={"query": "LM317 pins", "top_k": 2})
     assert response.status_code == 200
     body = response.json()
 
@@ -223,18 +236,18 @@ def test_retrieve_returns_chunks_with_tables_and_images(client):
     assert first["raw_text"] == "Pin 1 ADJ, pin 2 VOUT, pin 3 VIN."
     assert first["has_table"] and first["has_image"]
     assert first["images_base64"] == [base64.b64encode(JPEG_BYTES).decode()]
-    assert first["image_urls"] == [f"/images/{body['response_id']}/0"]
+    assert first["image_urls"] == [f"/v1/images/{body['response_id']}/0"]
     assert "original_content" not in first["metadata"]
     assert second["image_urls"] == [] and not second["has_image"]
 
 
 def test_retrieve_rejects_bad_input(client):
-    assert client.post("/retrieve", json={"query": ""}).status_code == 422
-    assert client.post("/retrieve", json={"query": "x", "top_k": 31}).status_code == 422
+    assert client.post("/v1/retrieve", json={"query": ""}).status_code == 422
+    assert client.post("/v1/retrieve", json={"query": "x", "top_k": 31}).status_code == 422
 
 
 def test_image_url_serves_jpeg(client):
-    body = client.post("/retrieve", json={"query": "LM317 pins", "top_k": 2}).json()
+    body = client.post("/v1/retrieve", json={"query": "LM317 pins", "top_k": 2}).json()
     response = client.get(body["chunks"][0]["image_urls"][0])
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/jpeg"
@@ -242,13 +255,13 @@ def test_image_url_serves_jpeg(client):
 
 
 def test_unknown_image_is_404(client):
-    body = client.post("/retrieve", json={"query": "LM317 pins", "top_k": 2}).json()
-    assert client.get(f"/images/{body['response_id']}/5").status_code == 404
-    assert client.get("/images/not-a-response-id/0").status_code == 404
+    body = client.post("/v1/retrieve", json={"query": "LM317 pins", "top_k": 2}).json()
+    assert client.get(f"/v1/images/{body['response_id']}/5").status_code == 404
+    assert client.get("/v1/images/not-a-response-id/0").status_code == 404
 
 
 def test_query_returns_answer_and_usage(client, backend):
-    response = client.post("/query", json={"query": "LM317 pins", "top_k": 2})
+    response = client.post("/v1/query", json={"query": "LM317 pins", "top_k": 2})
     assert response.status_code == 200
     body = response.json()
 
@@ -267,7 +280,7 @@ def test_query_defaults_come_from_settings(client, backend):
     """Without top_k or max_images the settings decide, and every chunk is used."""
     from config.settings import GENERATION_MAX_IMAGES, RETRIEVAL_K
 
-    body = client.post("/query", json={"query": "LM317 pins"}).json()
+    body = client.post("/v1/query", json={"query": "LM317 pins"}).json()
     assert body["num_chunks"] == min(RETRIEVAL_K, 2)
     assert body["usage"]["chunks_used"] == body["num_chunks"]
     assert body["usage"]["prompt_images"] <= GENERATION_MAX_IMAGES
@@ -279,7 +292,7 @@ def test_query_defaults_come_from_settings(client, backend):
 def test_query_llm_failure_is_502(client, backend):
     """A failing provider is a 502 whose detail carries the provider's message."""
     backend.llm_error = "quota exceeded"
-    response = client.post("/query", json={"query": "LM317 pins", "top_k": 2})
+    response = client.post("/v1/query", json={"query": "LM317 pins", "top_k": 2})
     assert response.status_code == 502
     assert response.json() == {"detail": "The model provider failed: quota exceeded"}
 
@@ -288,7 +301,7 @@ def test_query_llm_failure_is_502(client, backend):
 def test_answer_cut_off_before_any_text_is_502(client, backend, finish_reason):
     """OpenAI-style and Gemini names for "stopped at max_tokens" both count."""
     backend.finish_reason = finish_reason
-    response = client.post("/query", json={"query": "LM317 pins", "top_k": 2})
+    response = client.post("/v1/query", json={"query": "LM317 pins", "top_k": 2})
     assert response.status_code == 502
     assert "whole output budget (512 tokens" in response.json()["detail"]
     assert "Raise max_tokens" in response.json()["detail"]
@@ -296,7 +309,7 @@ def test_answer_cut_off_before_any_text_is_502(client, backend, finish_reason):
 
 def test_empty_answer_for_another_reason_is_502(client, backend):
     backend.finish_reason = "content_filter"
-    response = client.post("/query", json={"query": "LM317 pins", "top_k": 2})
+    response = client.post("/v1/query", json={"query": "LM317 pins", "top_k": 2})
     assert response.status_code == 502
     assert response.json()["detail"] == "The model returned no answer text (finish_reason: content_filter)."
 
@@ -309,13 +322,13 @@ def test_unexpected_error_is_500_without_internals(backend, monkeypatch):
 
     monkeypatch.setattr(api.service, "retrieve_chunks", broken)
     with TestClient(app, raise_server_exceptions=False) as test_client:
-        response = test_client.post("/retrieve", json={"query": "LM317 pins"})
+        response = test_client.post("/v1/retrieve", json={"query": "LM317 pins"})
     assert response.status_code == 500
     assert response.json() == {"detail": "Internal server error"}
 
 
 def test_stream_emits_retrieval_tokens_done(client):
-    response = client.get("/query/stream", params={"query": "LM317 pins", "top_k": 2})
+    response = client.get("/v1/query/stream", params={"query": "LM317 pins", "top_k": 2})
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
 
@@ -331,7 +344,7 @@ def test_stream_emits_retrieval_tokens_done(client):
 def test_stream_reports_llm_failure_as_error_event(client, backend):
     """Headers are already sent, so a mid-stream failure is an ``error`` event."""
     backend.llm_error = "quota exceeded"
-    response = client.get("/query/stream", params={"query": "LM317 pins", "top_k": 2})
+    response = client.get("/v1/query/stream", params={"query": "LM317 pins", "top_k": 2})
     events = _parse_sse(response.text)
     assert [name for name, _ in events] == ["retrieval", "error"]
     assert events[-1][1] == {"message": "The model provider failed: quota exceeded"}
@@ -339,13 +352,13 @@ def test_stream_reports_llm_failure_as_error_event(client, backend):
 
 def test_stream_with_broken_store_is_503(client, backend):
     backend.store_error = "store missing"
-    response = client.get("/query/stream", params={"query": "LM317 pins"})
+    response = client.get("/v1/query/stream", params={"query": "LM317 pins"})
     assert response.status_code == 503
 
 
 def test_custom_query_uses_chosen_model(client):
     response = client.post(
-        "/query/custom",
+        "/v1/query/custom",
         json={
             "query": "LM317 pins",
             "top_k": 2,
@@ -363,7 +376,7 @@ def test_custom_query_uses_chosen_model(client):
 def test_custom_query_text_only_model_gets_no_figures(client, backend):
     """A model the catalogue marks text-only is sent the text and tables only."""
     response = client.post(
-        "/query/custom",
+        "/v1/query/custom",
         json={
             "query": "LM317 pins",
             "top_k": 2,
@@ -381,7 +394,7 @@ def test_custom_query_text_only_model_gets_no_figures(client, backend):
 def test_custom_query_without_max_tokens_is_accepted(client):
     """max_tokens is optional; the catalogue default fills it in."""
     response = client.post(
-        "/query/custom",
+        "/v1/query/custom",
         json={"query": "LM317 pins", "top_k": 2, "provider": "groq",
               "model": "openai/gpt-oss-20b", "api_key": "k", "max_tokens": None},
     )
@@ -391,7 +404,7 @@ def test_custom_query_without_max_tokens_is_accepted(client):
 def test_custom_query_unknown_model_is_422(client, backend):
     """An unknown model is the caller's mistake, rejected before retrieval."""
     response = client.post(
-        "/query/custom",
+        "/v1/query/custom",
         json={"query": "x", "provider": "gemini", "model": "no-such-model", "api_key": "k"},
     )
     assert response.status_code == 422
@@ -402,7 +415,7 @@ def test_custom_query_unknown_model_is_422(client, backend):
 def test_custom_query_provider_failure_is_502(client, backend):
     backend.llm_error = "invalid API key"
     response = client.post(
-        "/query/custom",
+        "/v1/query/custom",
         json={"query": "x", "provider": "groq", "model": "openai/gpt-oss-20b", "api_key": "k"},
     )
     assert response.status_code == 502

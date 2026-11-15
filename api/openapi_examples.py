@@ -45,7 +45,7 @@ Ask a question about the indexed PDFs. The service:
 
 1. embeds the question with the same model used at ingest time,
 2. retrieves the `top_k` most relevant chunks from Chroma,
-3. (for `/query` and `/query/stream`) asks the multimodal LLM to answer
+3. (for `/v1/query` and `/v1/query/stream`) asks the multimodal LLM to answer
    using the chunk text, tables and figures.
 
 ### Try it
@@ -60,7 +60,7 @@ Ask a question about the indexed PDFs. The service:
 ### Response
 
 Every response includes a `response_id`; chunk figures can be loaded over
-HTTP via `GET /images/{response_id}/{index}`.
+HTTP via `GET /v1/images/{response_id}/{index}`.
 """
 
 

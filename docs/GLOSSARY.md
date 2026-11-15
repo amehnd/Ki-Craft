@@ -66,7 +66,9 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **Router (`APIRouter`).** A FastAPI object that collects endpoints in a module that does not have the app. `@router.get(...)` only records a route; `app.include_router(router)` copies the routes into the app, adding the router's `prefix` and `tags`. Here: one router per file in `api/routers/`.
 
-**Path parameter.** A `{name}` part of a route's path, such as `{index}` in `/images/{response_id}/{index}`. FastAPI passes it to the function parameter with the same name and converts it with that parameter's type hint, returning 422 when the conversion fails.
+**API versioning.** Putting a version in every path (`/v1/query`) so the API can change shape later under `/v2` while existing clients keep using `/v1`. Here the prefix is added once, in `api/main.py`'s `include_router(..., prefix="/v1")`; `/` and `/health` stay unversioned so probes never need a new URL.
+
+**Path parameter.** A `{name}` part of a route's path, such as `{index}` in `/v1/images/{response_id}/{index}`. FastAPI passes it to the function parameter with the same name and converts it with that parameter's type hint, returning 422 when the conversion fails.
 
 **MIME type (media type).** A standard label for a kind of content, such as `image/jpeg` or `application/json`, registered with IANA. The server sends it in the `Content-Type` header so the client knows how to read the bytes.
 
@@ -74,7 +76,7 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **Swagger UI.** The interactive page at `/docs` that FastAPI builds from the OpenAPI schema, where each endpoint can be tried in the browser. Its Examples dropdown comes from `Body(openapi_examples=...)`; here those examples live in `api/openapi_examples.py`.
 
-**SSE (Server-Sent Events).** A way for a server to send a stream of small messages over one HTTP response. Used to stream the answer token by token from `/query/stream`.
+**SSE (Server-Sent Events).** A way for a server to send a stream of small messages over one HTTP response. Used to stream the answer token by token from `/v1/query/stream`.
 
 **Event loop.** The single thread that runs all `async` endpoints in FastAPI. Blocking work on it stalls every request, which is why synchronous LangChain calls run in `asyncio.to_thread`.
 
@@ -84,7 +86,7 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **HTTP status code.** The three-digit number at the start of every HTTP response that says how it went, before anyone reads the body: 2xx succeeded, 4xx means the caller must change the request, 5xx means the server or something behind it failed. Clients, retries, proxies and uptime probes all act on it, which is why a failure must never be a 200. The codes this API uses are below; every error body is `{"detail": "..."}`.
 
-**422 Unprocessable Content.** The request was well-formed JSON but its content is wrong. FastAPI returns it when a body fails the Pydantic model (for example `top_k` 31); here `/query/custom` also returns it for a provider or model not in the catalogue.
+**422 Unprocessable Content.** The request was well-formed JSON but its content is wrong. FastAPI returns it when a body fails the Pydantic model (for example `top_k` 31); here `/v1/query/custom` also returns it for a provider or model not in the catalogue.
 
 **500 Internal Server Error.** Something failed that the code did not expect. Here the caller gets only `"Internal server error"` and the traceback goes to the log, because error text can expose file paths and library internals.
 

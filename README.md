@@ -127,7 +127,7 @@ A raw datasheet chunk mixes prose, an HTML table, and figures, and an embedding 
 | Embeddings | `ibm/granite-embedding-278m-multilingual` (768 dimensions) | IBM watsonx.ai |
 | Vector store | Chroma, cosine similarity, HNSW index | embedded, on disk in `dbv2/chroma_db` |
 | Retrieval | MMR: fetch the 20 nearest chunks, keep 10 that differ from each other | `src/retrieval/search.py` |
-| Generation | `gemini-3.5-flash-lite`; other providers through `/query/custom` | Google Gemini API |
+| Generation | `gemini-3.5-flash-lite`; other providers through `/v1/query/custom` | Google Gemini API |
 | Tracing | LangSmith (optional) | hosted |
 
 The terms used here (MMR, HNSW, SSE, and so on) are explained in [docs/GLOSSARY.md](docs/GLOSSARY.md).
@@ -205,8 +205,8 @@ WATSONX_URL=https://eu-de.ml.cloud.ibm.com
 | `WATSONX_API_KEY` | Embedding every question, and every chunk at ingestion | An IBM Cloud API key |
 | `WATSONX_PROJECT_ID` | Same | The id of your watsonx.ai project |
 | `WATSONX_URL` | Same | Region endpoint; defaults to `https://eu-de.ml.cloud.ibm.com` |
-| `HF_TOKEN` | Ingestion only (chunk summaries); also the default key for Hugging Face models in `/query/custom` | Create one at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
-| `GROQ_API_KEY`, `OPENAI_API_KEY` | Optional default keys for those providers in `/query/custom` | A key can also be sent with the request |
+| `HF_TOKEN` | Ingestion only (chunk summaries); also the default key for Hugging Face models in `/v1/query/custom` | Create one at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
+| `GROQ_API_KEY`, `OPENAI_API_KEY` | Optional default keys for those providers in `/v1/query/custom` | A key can also be sent with the request |
 | `API_BASE_URL` | Dashboard | Where the dashboard finds the API; defaults to `http://localhost:8000` |
 | `CORS_ALLOWED_ORIGINS` | API | Comma-separated origins allowed to call the API from a browser |
 | `GENERATION_MAX_TOKENS` | API | Output token limit per answer; defaults to 512 |
@@ -231,28 +231,28 @@ Interactive documentation is at http://127.0.0.1:8001/docs.
 |---|---|---|
 | GET | `/` | Lists the endpoints |
 | GET | `/health` | Reports whether the vector store loaded |
-| POST | `/retrieve` | Returns the retrieved chunks, with no LLM call |
-| POST | `/query` | Retrieves, then answers with the default model |
-| GET | `/query/stream` | The same, streamed token by token over Server-Sent Events |
-| POST | `/query/custom` | The same retrieval, answered by a provider and model chosen in the request |
-| GET | `/images/{response_id}/{index}` | Serves a figure returned by an earlier response |
+| POST | `/v1/retrieve` | Returns the retrieved chunks, with no LLM call |
+| POST | `/v1/query` | Retrieves, then answers with the default model |
+| GET | `/v1/query/stream` | The same, streamed token by token over Server-Sent Events |
+| POST | `/v1/query/custom` | The same retrieval, answered by a provider and model chosen in the request |
+| GET | `/v1/images/{response_id}/{index}` | Serves a figure returned by an earlier response |
 
 Retrieve chunks only:
 
 ```bash
-curl -X POST http://127.0.0.1:8001/retrieve -H 'Content-Type: application/json' -d '{"query": "LM555 astable operation frequency formula", "top_k": 10}'
+curl -X POST http://127.0.0.1:8001/v1/retrieve -H 'Content-Type: application/json' -d '{"query": "LM555 astable operation frequency formula", "top_k": 10}'
 ```
 
 Ask a question:
 
 ```bash
-curl -X POST http://127.0.0.1:8001/query -H 'Content-Type: application/json' -d '{"query": "What is the dropout voltage of the TLV1117?"}'
+curl -X POST http://127.0.0.1:8001/v1/query -H 'Content-Type: application/json' -d '{"query": "What is the dropout voltage of the TLV1117?"}'
 ```
 
 Stream an answer:
 
 ```bash
-curl -N --get http://127.0.0.1:8001/query/stream --data-urlencode 'query=What is the output voltage range of the LM317?'
+curl -N --get http://127.0.0.1:8001/v1/query/stream --data-urlencode 'query=What is the output voltage range of the LM317?'
 ```
 
 The full request and response shapes are in [API.md](API.md).
@@ -397,14 +397,14 @@ Every tunable lives in `config/settings.py`.
 | `CHUNK_MAX_CHARACTERS` | `3000` | Largest chunk |
 | `ENHANCEMENT_MODEL` | `zai-org/GLM-4.5V` | Vision model that writes the chunk summaries |
 
-The providers and models offered by `/query/custom` are listed in `config/providers.py`.
+The providers and models offered by `/v1/query/custom` are listed in `config/providers.py`.
 
 ## Project structure
 
 ```
 config/
   settings.py            every tunable and environment variable
-  providers.py           LLM providers and models for /query/custom
+  providers.py           LLM providers and models for /v1/query/custom
 src/
   embed.py               the one embedding factory (watsonx Granite)
   documents.py           turns stored chunk metadata back into text, tables, figures
