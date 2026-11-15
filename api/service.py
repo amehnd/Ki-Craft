@@ -41,6 +41,14 @@ logger = get_logger(__name__)
 _EXCLUDED_META_KEYS = {"original_content", "raw_text", "tables_html", "images_base64", "image_paths"}
 
 
+class StoreUnavailableError(RuntimeError):
+    """The embedding client or the vector store could not be loaded.
+
+    ``api/main.py`` maps it to HTTP 503: the service cannot answer right now,
+    and ``/health`` reports the same.
+    """
+
+
 class RAGService:
     """Lazily loads the vector store and exposes retrieve/answer operations."""
 
@@ -53,11 +61,19 @@ class RAGService:
     # -- lifecycle ----------------------------------------------------------
 
     async def ensure_ready(self) -> None:
-        """Load the vector store on first use (idempotent, thread-safe)."""
+        """Load the vector store on first use (idempotent, thread-safe).
+
+        Raises:
+            StoreUnavailableError: If the embedding client or the store fails
+                to load. The next call tries again.
+        """
         if self._db is None:
             async with self._load_lock:
                 if self._db is None:
-                    await asyncio.to_thread(self._load)
+                    try:
+                        await asyncio.to_thread(self._load)
+                    except Exception as exc:
+                        raise StoreUnavailableError(f"Vector store unavailable: {exc}") from exc
 
     def _load(self) -> None:
         logger.info("Loading embedding model and vector store...")

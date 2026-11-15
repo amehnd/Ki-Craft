@@ -30,7 +30,7 @@ from config.settings import (
     GENERATION_TEMPERATURE,
 )
 from src.documents import extract_original_data
-from src.llm import create_llm
+from src.llm import LLMProviderError, create_llm
 from src.logger import get_logger
 from src.retrieval.search import retrieve_chunks
 from src.tracing import summarize_chunks
@@ -180,6 +180,22 @@ def _build_message_content(
     return content
 
 
+# What providers report when a reply stopped at max_tokens: OpenAI-style
+# APIs (OpenAI, Groq, Hugging Face) say "length", Gemini says "MAX_TOKENS".
+_OUT_OF_BUDGET = {"length", "MAX_TOKENS"}
+
+
+def _empty_answer_message(finish_reason: str | None, usage: dict[str, Any]) -> str:
+    """Explain why the model returned no answer text."""
+    if finish_reason in _OUT_OF_BUDGET:
+        return (
+            f"The model used its whole output budget ({usage.get('output_tokens', '?')} "
+            "tokens, reasoning included) before writing any answer text. "
+            "Raise max_tokens and try again."
+        )
+    return f"The model returned no answer text (finish_reason: {finish_reason or 'not reported'})."
+
+
 def default_llm() -> BaseChatModel:
     """Create the default chat model configured in ``config/settings.py``.
 
@@ -294,6 +310,10 @@ def answer_query_stream(
         ``("chunks", list[Document])`` once, as soon as retrieval finishes;
         then ``("token", str)`` for each piece of the answer; then
         ``("usage", dict)`` once, with token counts, latency and prompt size.
+
+    Raises:
+        LLMProviderError: From ``generate_answer_stream``, if the provider
+            fails or writes no answer text.
     """
     if run_tree is not None:
         run_tree.add_metadata({"model": model_id})
@@ -350,56 +370,67 @@ def generate_answer_stream(
 
     Yields:
         Answer token strings.
+
+    Raises:
+        LLMProviderError: If the provider call fails, or the model finishes
+            without writing any answer text (for example, it spent its whole
+            ``max_tokens`` budget on reasoning).
     """
     if usage is None:
         usage = {}
 
+    chunk_summaries = summarize_chunks(chunks)
+    total_images = sum(c.get("image_count", 0) for c in chunk_summaries)
+    total_tables = sum(c.get("table_count", 0) for c in chunk_summaries)
+
+    logger.info("  %d chunks received by generation", len(chunks))
+    for ci, c in enumerate(chunks):
+        od = extract_original_data(c)
+        logger.debug(
+            "    Chunk %d: summary=%d chars, tables=%d, images=%d",
+            ci + 1,
+            len(c.page_content or ""),
+            len(od["tables_html"]),
+            len(od["images_base64"]),
+        )
+
+    message_content = _build_message_content(chunks, query, max_images, send_images)
+
+    prompt_chars, prompt_images = _prompt_stats(message_content)
+    usage.update(
+        {
+            "model": model_id,
+            "prompt_chars": prompt_chars,
+            "prompt_images": prompt_images,
+            "chunks_used": len(chunks),
+        }
+    )
+
+    logger.info(
+        "LangSmith trace: %d chunks, %d images, %d tables",
+        len(chunks),
+        total_images,
+        total_tables,
+    )
+
+    message = HumanMessage(content=message_content)
+    start = time.perf_counter()
+    wrote_text = False
+    finish_reason = None
     try:
-        chunk_summaries = summarize_chunks(chunks)
-        total_images = sum(c.get("image_count", 0) for c in chunk_summaries)
-        total_tables = sum(c.get("table_count", 0) for c in chunk_summaries)
-
-        logger.info("  %d chunks received by generation", len(chunks))
-        for ci, c in enumerate(chunks):
-            od = extract_original_data(c)
-            logger.debug(
-                "    Chunk %d: summary=%d chars, tables=%d, images=%d",
-                ci + 1,
-                len(c.page_content or ""),
-                len(od["tables_html"]),
-                len(od["images_base64"]),
-            )
-
-        message_content = _build_message_content(chunks, query, max_images, send_images)
-
-        prompt_chars, prompt_images = _prompt_stats(message_content)
-        usage.update(
-            {
-                "model": model_id,
-                "prompt_chars": prompt_chars,
-                "prompt_images": prompt_images,
-                "chunks_used": len(chunks),
-            }
-        )
-
-        logger.info(
-            "LangSmith trace: %d chunks, %d images, %d tables",
-            len(chunks),
-            total_images,
-            total_tables,
-        )
-
-        message = HumanMessage(content=message_content)
-        start = time.perf_counter()
         for chunk in llm.stream([message]):
             token_text = _extract_text(chunk.content)
             if token_text:
+                wrote_text = True
                 yield token_text
             _capture_usage(chunk, usage)
-        usage["latency_ms"] = round((time.perf_counter() - start) * 1000, 1)
-        usage["estimated_cost_usd"] = _estimate_cost(usage)
+            finish_reason = (chunk.response_metadata or {}).get("finish_reason") or finish_reason
+    except Exception as exc:
+        logger.warning("Model provider failed: %s", type(exc).__name__)
+        raise LLMProviderError(f"The model provider failed: {exc}") from exc
+    usage["latency_ms"] = round((time.perf_counter() - start) * 1000, 1)
+    usage["estimated_cost_usd"] = _estimate_cost(usage)
 
-    except Exception as e:
-        logger.warning("Answer generation failed: %s", e)
-        usage["error"] = str(e)
-        yield f"Sorry, could not complete response due to: {e}"
+    if not wrote_text:
+        raise LLMProviderError(_empty_answer_message(finish_reason, usage))
+

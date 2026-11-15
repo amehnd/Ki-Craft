@@ -22,6 +22,22 @@ def _url(path: str) -> str:
     return f"{API_BASE_URL.rstrip('/')}{path}"
 
 
+def _raise_for_status(response: requests.Response) -> None:
+    """Raise ``requests.HTTPError`` carrying the server's ``detail`` message.
+
+    ``response.raise_for_status`` alone says only "502 Server Error: Bad
+    Gateway for url ...". Every API error body is ``{"detail": "..."}``, so the
+    message here tells the user why the request failed.
+    """
+    if response.ok:
+        return
+    try:
+        detail = response.json().get("detail", response.text)
+    except ValueError:
+        detail = response.text
+    raise requests.HTTPError(f"{response.status_code}: {detail}", response=response)
+
+
 def _absolutize_image_urls(payload: dict[str, Any]) -> dict[str, Any]:
     """Turn relative ``/images/...`` URLs into absolute backend URLs."""
     for chunk in payload.get("chunks", []):
@@ -30,9 +46,14 @@ def _absolutize_image_urls(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def health() -> dict:
-    """Return the backend health payload, raising on failure/unreachable."""
+    """Return the backend health payload, raising if the backend is unreachable.
+
+    A 503 still returns its body (``status: "error"`` with a ``detail``), so
+    the caller can tell "running but unhealthy" from "not reachable".
+    """
     response = requests.get(_url("/health"), timeout=10)
-    response.raise_for_status()
+    if response.status_code != 503:
+        _raise_for_status(response)
     return response.json()
 
 
@@ -43,7 +64,7 @@ def retrieve(query: str, top_k: int = 5) -> dict:
         json={"query": query, "top_k": top_k},
         timeout=_REQUEST_TIMEOUT,
     )
-    response.raise_for_status()
+    _raise_for_status(response)
     return _absolutize_image_urls(response.json())
 
 
@@ -54,7 +75,7 @@ def query(query: str, top_k: int = 5) -> dict:
         json={"query": query, "top_k": top_k},
         timeout=_REQUEST_TIMEOUT,
     )
-    response.raise_for_status()
+    _raise_for_status(response)
     return _absolutize_image_urls(response.json())
 
 
@@ -70,7 +91,7 @@ def stream(query: str, top_k: int = 5) -> Iterator[tuple[str, dict]]:
         stream=True,
         timeout=_REQUEST_TIMEOUT,
     ) as response:
-        response.raise_for_status()
+        _raise_for_status(response)
         event: str | None = None
         for line in response.iter_lines(decode_unicode=True):
             if not line:
@@ -109,5 +130,5 @@ def query_custom(
         },
         timeout=_REQUEST_TIMEOUT,
     )
-    response.raise_for_status()
+    _raise_for_status(response)
     return _absolutize_image_urls(response.json())

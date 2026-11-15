@@ -82,6 +82,20 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **202 Accepted.** An HTTP status meaning "the request was accepted and will finish later". Used for long jobs such as ingestion, with a status URL to check.
 
+**HTTP status code.** The three-digit number at the start of every HTTP response that says how it went, before anyone reads the body: 2xx succeeded, 4xx means the caller must change the request, 5xx means the server or something behind it failed. Clients, retries, proxies and uptime probes all act on it, which is why a failure must never be a 200. The codes this API uses are below; every error body is `{"detail": "..."}`.
+
+**422 Unprocessable Content.** The request was well-formed JSON but its content is wrong. FastAPI returns it when a body fails the Pydantic model (for example `top_k` 31); here `/query/custom` also returns it for a provider or model not in the catalogue.
+
+**500 Internal Server Error.** Something failed that the code did not expect. Here the caller gets only `"Internal server error"` and the traceback goes to the log, because error text can expose file paths and library internals.
+
+**502 Bad Gateway.** The server was acting for another server (here the model provider) and did not get a usable answer from it: the provider raised an error, or it returned no answer text. It tells the caller our service is fine but the upstream failed, so retrying later, or with another model, may work.
+
+**503 Service Unavailable.** The server cannot handle requests right now. Here: the vector store could not be loaded. Uptime probes such as Railway's health check treat it as "not healthy".
+
+**Exception handler.** A function registered with `@app.exception_handler(SomeError)` in `api/main.py`. When a route raises that error and nothing catches it, FastAPI calls the handler, which turns it into a response. Routes can then just raise, and the mapping from error to status code lives in one place.
+
+**finish_reason.** Why the model stopped writing, reported with the last streamed chunk: `stop` (done), `length` (OpenAI-style providers) or `MAX_TOKENS` (Gemini) when it hit `max_tokens`, or a safety reason. A reply with no text and `length` means reasoning used up the whole budget. `src/retrieval/generate.py:_empty_answer_message`.
+
 ## Docker and deployment
 
 **Image.** A read-only snapshot of a filesystem plus a start command. `docker build` produces it from the `Dockerfile`; `docker run` starts a container from it. Here: `multimodal-rag-api`.
@@ -134,6 +148,6 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **TestClient.** FastAPI's in-process HTTP client, built on `httpx`. It sends real requests to the app without starting a server or opening a port. Used inside `with`, it also runs the app's lifespan.
 
-**Characterization test.** A test that records what the code does now, including behaviour known to be wrong, so a refactor can prove it changed nothing. When the defect is fixed, the test is updated in the same change. `test_health_reports_store_failure` is one; its docstring names the defect.
+**Characterization test.** A test that records what the code does now, including behaviour known to be wrong, so a refactor can prove it changed nothing. When the defect is fixed, the test is updated in the same change. The known-defect tests in `tests/test_api.py` (a 200 for a failing store, an apology for a failing provider, a 500 for an unknown model) were examples until commit 6a fixed those status codes.
 
 **Marker.** A label on a test (`@pytest.mark.live`) that lets a run select it or leave it out with `-m`. Markers are registered in `pyproject.toml`. Here `live` tests are skipped unless the run uses `-m live`.

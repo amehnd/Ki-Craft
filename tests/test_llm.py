@@ -83,13 +83,13 @@ def test_no_reasoning_setting_is_sent(built, provider, model):
 
 
 def test_unknown_provider_is_rejected(built):
-    with pytest.raises(ValueError, match="Unknown provider nope"):
+    with pytest.raises(llm.UnknownModelError, match="Unknown provider nope"):
         llm.create_llm("nope", "gpt-4o", "key")
     assert built == {}
 
 
 def test_unknown_model_is_rejected(built):
-    with pytest.raises(ValueError, match="Model gpt-9 not found for provider openai"):
+    with pytest.raises(llm.UnknownModelError, match="Model gpt-9 not found for provider openai"):
         llm.create_llm("openai", "gpt-9", "key")
     assert built == {}
 

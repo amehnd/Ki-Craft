@@ -18,6 +18,7 @@ from api.openapi_examples import (
     QUERY_BODY_EXAMPLES,
     QUERY_PARAM_EXAMPLES,
     RICH_DESCRIPTION_COMMON,
+    error_responses,
 )
 from api.schemas import (
     CustomQueryRequest,
@@ -27,7 +28,7 @@ from api.schemas import (
     UsageMetadata,
 )
 from config.settings import GENERATION_MAX_IMAGES, RETRIEVAL_K
-from src.llm import create_llm
+from src.llm import UnknownModelError, create_llm
 
 router = APIRouter(tags=["generation"])
 
@@ -49,16 +50,14 @@ router = APIRouter(tags=["generation"])
     )
     + RICH_DESCRIPTION_COMMON,
     response_description="Retrieved chunks plus the generated answer",
+    responses=error_responses(502, 503),
 )
 async def query(
     request: Request,
     req: Annotated[QueryRequest, Body(openapi_examples=QUERY_BODY_EXAMPLES)],
 ) -> QueryResponse:
     """Retrieve chunks and generate a full answer from the multimodal LLM."""
-    try:
-        answer, base, usage = await request.app.state.service.answer(req.query, req.top_k, req.max_images)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    answer, base, usage = await request.app.state.service.answer(req.query, req.top_k, req.max_images)
     return QueryResponse(
         **base.model_dump(),
         answer=answer,
@@ -80,11 +79,12 @@ def _sse(event: str, data: dict) -> str:
         "1. ``event: retrieval`` - full chunk payloads (like /retrieve),\n"
         "2. ``event: token``    - one per answer fragment (field ``delta``),\n"
         "3. ``event: done``     - final answer + ``response_id``,\n"
-        "4. ``event: error``    - only on failure.\n\n"
+        "4. ``event: error``    - only on failure (``message`` says why).\n\n"
         "Open the URL directly in a browser to watch the stream, or consume it "
         "with any SSE client. Works with e.g. ``curl -N``."
     ),
     response_description="text/event-stream of retrieval + answer tokens",
+    responses=error_responses(503),
 )
 async def query_stream(
     request: Request,
@@ -159,9 +159,13 @@ async def query_stream(
         "- ``provider``: one of ``gemini``, ``groq``, ``huggingface``, ``openai``\n"
         "- ``model``: a valid model ID for that provider\n"
         "- ``api_key``: your personal API key for the provider\n"
-        "- ``query``, ``top_k``, ``temperature``, ``max_tokens`` as usual"
+        "- ``query``, ``top_k``, ``temperature``, ``max_tokens`` as usual\n\n"
+        "A provider or model that is not in the catalogue is rejected with 422 "
+        "before retrieval runs. A failing provider (bad key, quota, timeout) "
+        "returns 502 with the provider's message."
     ),
     response_description="Retrieved chunks plus the generated answer with usage metadata",
+    responses=error_responses(502, 503),
 )
 async def query_custom(
     request: Request,
@@ -177,24 +181,20 @@ async def query_custom(
             temperature=req.temperature,
             max_tokens=req.max_tokens,
         )
-        answer, base, usage = await request.app.state.service.answer(
-            req.query,
-            req.top_k,
-            req.max_images,
-            llm=llm,
-            provider_id=req.provider,
-            model_id=req.model,
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except UnknownModelError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
-    usage_metadata = None
-    if usage and "error" not in usage:
-        usage_metadata = UsageMetadata(**usage)
-
+    answer, base, usage = await request.app.state.service.answer(
+        req.query,
+        req.top_k,
+        req.max_images,
+        llm=llm,
+        provider_id=req.provider,
+        model_id=req.model,
+    )
     return CustomQueryResponse(
         **base.model_dump(),
         answer=answer,
         answer_characters=len(answer),
-        usage=usage_metadata,
+        usage=UsageMetadata(**usage),
     )

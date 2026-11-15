@@ -1,8 +1,8 @@
 """Multimodal RAG HTTP API: the FastAPI application.
 
 This module only assembles the app: it creates it, adds CORS, sets up the
-lifespan that holds one ``RAGService``, and includes the routers in
-``api/routers/``, where the endpoints live.
+lifespan that holds one ``RAGService``, turns errors into HTTP status codes,
+and includes the routers in ``api/routers/``, where the endpoints live.
 
 Run:
     uvicorn api.main:app --reload --port 8000
@@ -15,12 +15,17 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from api.routers import images, query, retrieval, system
-from api.service import RAGService
+from api.service import RAGService, StoreUnavailableError
 from config.settings import CORS_ALLOWED_ORIGINS
+from src.llm import LLMProviderError
+from src.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
@@ -52,6 +57,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(LLMProviderError)
+async def llm_provider_error(request: Request, exc: LLMProviderError) -> JSONResponse:
+    """The model provider failed or wrote nothing: 502 Bad Gateway."""
+    return JSONResponse(status_code=502, content={"detail": str(exc)})
+
+
+@app.exception_handler(StoreUnavailableError)
+async def store_unavailable(request: Request, exc: StoreUnavailableError) -> JSONResponse:
+    """The vector store could not be loaded: 503 Service Unavailable."""
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
+@app.exception_handler(Exception)
+async def unexpected_error(request: Request, exc: Exception) -> JSONResponse:
+    """Any other failure: 500, with the details in the log, not the response."""
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
 
 app.include_router(system.router)
 app.include_router(retrieval.router)

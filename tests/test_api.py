@@ -93,6 +93,7 @@ class FakeBackend:
     def __init__(self):
         self.store_error: str | None = None
         self.llm_error: str | None = None
+        self.finish_reason: str | None = None
         self.prompts: list = []
 
     def load_store(self, embedding_model) -> _FakeStore:
@@ -107,7 +108,11 @@ class FakeBackend:
 
 
 class _FakeLLM:
-    """Streams two tokens, then reports usage on the last chunk like Gemini."""
+    """Streams two tokens, then reports usage on the last chunk like Gemini.
+
+    With ``backend.finish_reason`` set it writes no text at all and stops with
+    that reason, like a reasoning model that spent its whole budget.
+    """
 
     def __init__(self, backend: FakeBackend):
         self._backend = backend
@@ -117,6 +122,13 @@ class _FakeLLM:
         self._backend.prompts.append(messages)
         if self._backend.llm_error:
             raise RuntimeError(self._backend.llm_error)
+        if self._backend.finish_reason:
+            yield AIMessageChunk(
+                content="",
+                usage_metadata={"input_tokens": 10, "output_tokens": 512, "total_tokens": 522},
+                response_metadata={"finish_reason": self._backend.finish_reason},
+            )
+            return
         yield AIMessageChunk(content="Hello")
         yield AIMessageChunk(
             content=" world",
@@ -179,16 +191,20 @@ def test_health_ok(client):
     assert response.json() == {"status": "ok", "vector_store": "loaded"}
 
 
-def test_health_reports_store_failure(client, backend):
-    """A broken store is reported in the body with status 200.
-
-    Known defect: AGENTS.md ("Errors are real HTTP errors") calls for a 503.
-    """
+def test_health_reports_store_failure_as_503(client, backend):
+    """A broken store is a 503, so an uptime probe can read the code alone."""
     backend.store_error = "store missing"
     response = client.get("/health")
-    assert response.status_code == 200
+    assert response.status_code == 503
     assert response.json()["status"] == "error"
-    assert response.json()["detail"] == "store missing"
+    assert response.json()["detail"] == "Vector store unavailable: store missing"
+
+
+def test_query_with_broken_store_is_503(client, backend):
+    backend.store_error = "store missing"
+    response = client.post("/query", json={"query": "LM317 pins"})
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Vector store unavailable: store missing"}
 
 
 def test_retrieve_returns_chunks_with_tables_and_images(client):
@@ -260,15 +276,42 @@ def test_query_defaults_come_from_settings(client, backend):
     assert "--- Chunk 2 ---" in prompt
 
 
-def test_query_llm_failure_becomes_answer_text(client, backend):
-    """An LLM failure is returned as a 200 whose answer is an apology.
-
-    Known defect: AGENTS.md ("Errors are real HTTP errors") calls for a 502.
-    """
+def test_query_llm_failure_is_502(client, backend):
+    """A failing provider is a 502 whose detail carries the provider's message."""
     backend.llm_error = "quota exceeded"
     response = client.post("/query", json={"query": "LM317 pins", "top_k": 2})
-    assert response.status_code == 200
-    assert response.json()["answer"] == "Sorry, could not complete response due to: quota exceeded"
+    assert response.status_code == 502
+    assert response.json() == {"detail": "The model provider failed: quota exceeded"}
+
+
+@pytest.mark.parametrize("finish_reason", ["length", "MAX_TOKENS"])
+def test_answer_cut_off_before_any_text_is_502(client, backend, finish_reason):
+    """OpenAI-style and Gemini names for "stopped at max_tokens" both count."""
+    backend.finish_reason = finish_reason
+    response = client.post("/query", json={"query": "LM317 pins", "top_k": 2})
+    assert response.status_code == 502
+    assert "whole output budget (512 tokens" in response.json()["detail"]
+    assert "Raise max_tokens" in response.json()["detail"]
+
+
+def test_empty_answer_for_another_reason_is_502(client, backend):
+    backend.finish_reason = "content_filter"
+    response = client.post("/query", json={"query": "LM317 pins", "top_k": 2})
+    assert response.status_code == 502
+    assert response.json()["detail"] == "The model returned no answer text (finish_reason: content_filter)."
+
+
+def test_unexpected_error_is_500_without_internals(backend, monkeypatch):
+    """The caller sees a generic message; the real one stays in the server log."""
+
+    def broken(retriever, query):
+        raise RuntimeError("secret internal path /srv/app")
+
+    monkeypatch.setattr(api.service, "retrieve_chunks", broken)
+    with TestClient(app, raise_server_exceptions=False) as test_client:
+        response = test_client.post("/retrieve", json={"query": "LM317 pins"})
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Internal server error"}
 
 
 def test_stream_emits_retrieval_tokens_done(client):
@@ -283,6 +326,21 @@ def test_stream_emits_retrieval_tokens_done(client):
     done = events[-1][1]
     assert done["answer"] == "Hello world"
     assert done["response_id"] == events[0][1]["response_id"]
+
+
+def test_stream_reports_llm_failure_as_error_event(client, backend):
+    """Headers are already sent, so a mid-stream failure is an ``error`` event."""
+    backend.llm_error = "quota exceeded"
+    response = client.get("/query/stream", params={"query": "LM317 pins", "top_k": 2})
+    events = _parse_sse(response.text)
+    assert [name for name, _ in events] == ["retrieval", "error"]
+    assert events[-1][1] == {"message": "The model provider failed: quota exceeded"}
+
+
+def test_stream_with_broken_store_is_503(client, backend):
+    backend.store_error = "store missing"
+    response = client.get("/query/stream", params={"query": "LM317 pins"})
+    assert response.status_code == 503
 
 
 def test_custom_query_uses_chosen_model(client):
@@ -330,15 +388,22 @@ def test_custom_query_without_max_tokens_is_accepted(client):
     assert response.status_code == 200
 
 
-def test_custom_query_unknown_model_is_500(client):
-    """An unknown model is reported as a server error.
-
-    Known defect: it is a client mistake, so AGENTS.md ("Errors are real HTTP
-    errors") calls for a 4xx.
-    """
+def test_custom_query_unknown_model_is_422(client, backend):
+    """An unknown model is the caller's mistake, rejected before retrieval."""
     response = client.post(
         "/query/custom",
         json={"query": "x", "provider": "gemini", "model": "no-such-model", "api_key": "k"},
     )
-    assert response.status_code == 500
-    assert "no-such-model" in response.json()["detail"]
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Model no-such-model not found for provider gemini"}
+    assert backend.prompts == []
+
+
+def test_custom_query_provider_failure_is_502(client, backend):
+    backend.llm_error = "invalid API key"
+    response = client.post(
+        "/query/custom",
+        json={"query": "x", "provider": "groq", "model": "openai/gpt-oss-20b", "api_key": "k"},
+    )
+    assert response.status_code == 502
+    assert response.json() == {"detail": "The model provider failed: invalid API key"}

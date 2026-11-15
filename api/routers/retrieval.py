@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, Request
 
-from api.openapi_examples import QUERY_BODY_EXAMPLES, RICH_DESCRIPTION_COMMON
+from api.openapi_examples import QUERY_BODY_EXAMPLES, RICH_DESCRIPTION_COMMON, error_responses
 from api.schemas import RetrieveRequest, RetrieveResponse
 
 router = APIRouter(tags=["retrieval"])
@@ -23,13 +23,11 @@ router = APIRouter(tags=["retrieval"])
     )
     + RICH_DESCRIPTION_COMMON,
     response_description="Retrieved chunks with multimodal content",
+    responses=error_responses(503),
 )
 async def retrieve(
     request: Request,
     req: Annotated[RetrieveRequest, Body(openapi_examples=QUERY_BODY_EXAMPLES)],
 ) -> RetrieveResponse:
     """Retrieve chunks for a query; returns text, tables and images."""
-    try:
-        return await request.app.state.service.retrieve(req.query, req.top_k)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    return await request.app.state.service.retrieve(req.query, req.top_k)

@@ -9,12 +9,16 @@ from __future__ import annotations
 
 import contextvars
 import json
+
+import pytest
 from concurrent.futures import ThreadPoolExecutor
 
 from langchain_core.documents import Document
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
 from langsmith.run_helpers import tracing_context
+
+from src.llm import LLMProviderError
 
 from src.retrieval import generate
 
@@ -114,3 +118,21 @@ def test_inputs_hold_the_question_and_metadata_holds_the_model():
     assert "llm" not in root["inputs"] and "model_id" not in root["inputs"]
     assert root["extra"]["metadata"]["model"] == "test-model"
     assert "GenericFakeChatModel" not in json.dumps(root["inputs"], default=str)
+
+
+def test_a_failed_generation_is_recorded_as_an_error():
+    """A provider failure ends both runs with an error, not a successful apology.
+
+    This fake model raises when it has no text to stream, which stands in for
+    any failing provider.
+    """
+    client = _RecordingClient()
+    llm = GenericFakeChatModel(messages=iter([AIMessage(content="")]))
+    with tracing_context(enabled=True, client=client, project_name="test"):
+        stream = generate.answer_query_stream(_FakeRetriever(), "LM555 pins?", llm, "test-model")
+        with pytest.raises(LLMProviderError, match="The model provider failed"):
+            for _ in stream:
+                pass
+    named = _by_name(client.runs)
+    assert "The model provider failed" in named["GenerateAnswerStream"]["error"]
+    assert "The model provider failed" in named["AnswerQuery"]["error"]

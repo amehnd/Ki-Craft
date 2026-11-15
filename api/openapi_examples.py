@@ -63,3 +63,18 @@ Every response includes a `response_id`; chunk figures can be loaded over
 HTTP via `GET /images/{response_id}/{index}`.
 """
 
+
+
+def error_responses(*codes: int) -> dict[int, dict]:
+    """Describe a route's error status codes for ``/docs``.
+
+    Every error body has one shape, ``{"detail": "..."}``; the handlers that
+    produce them are in ``api/main.py``. 422 is not listed: FastAPI already
+    documents it, with its schema, on every route that takes a body.
+    """
+    descriptions = {
+        500: "Unexpected server error; details are in the server log",
+        502: "The model provider failed, or returned no answer text",
+        503: "The vector store could not be loaded",
+    }
+    return {code: {"description": descriptions[code]} for code in codes}

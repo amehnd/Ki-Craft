@@ -59,11 +59,9 @@ def test_query_returns_answer(live_client):
     response = live_client.post(
         "/query", json={"query": _FIGURE_QUESTION, "top_k": 3, "max_images": 1}
     )
-    assert response.status_code == 200
-    answer = response.json()["answer"]
-    assert answer.strip()
-    # A provider failure arrives as a 200 with this text, not as an error status.
-    assert not answer.startswith("Sorry, could not complete response")
+    # A provider failure is a 502 whose detail says why.
+    assert response.status_code == 200, response.json().get("detail")
+    assert response.json()["answer"].strip()
 
 
 def test_figure_loads(live_client):

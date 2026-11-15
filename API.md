@@ -20,7 +20,7 @@ supporting evidence: the exact document chunks, their tables, and their figures.
 | Endpoint | Method | Purpose | Returns |
 |---|---|---|---|
 | `/` | GET | Index / endpoint list | `{name, version, endpoints}` |
-| `/health` | GET | Is the service up? | `{status: "ok", vector_store: "loaded"}` |
+| `/health` | GET | Is the service up? | `{status: "ok", vector_store: "loaded"}`, or **503** when the store cannot load |
 | `/retrieve` | POST | Get evidence **without** an answer | `RetrieveResponse` |
 | `/query` | POST | Get evidence **and** a full answer | `QueryResponse` |
 | `/query/stream` | GET | Same as `/query` but token-by-token (SSE) | Server-Sent Events |
@@ -32,6 +32,21 @@ There are only **three shapes** you need to understand:
 1. **Request** — always the same: `{"query": "...", "top_k": 5, "max_images": 3}` (both optional).
 2. **`RetrieveResponse`** — the chunks + everything they contain.
 3. **`QueryResponse`** — the same, plus `answer` and `answer_characters`.
+
+### Errors
+
+A failure is a real HTTP error status, never a 200 with an apology in the
+answer. Every error body has the same shape: `{"detail": "..."}`.
+
+| Status | Meaning | Example `detail` |
+|---|---|---|
+| `422` | The body is invalid (FastAPI's own check, `detail` is a list), or `/query/custom` named a provider or model that is not in the catalogue | `"Model gpt-9 not found for provider openai"` |
+| `500` | Unexpected server error; the real message is only in the server log | `"Internal server error"` |
+| `502` | The model provider failed (bad key, quota, timeout), or it returned no answer text | `"The model provider failed: ..."`, or `"The model used its whole output budget (512 tokens, reasoning included) before writing any answer text. Raise max_tokens and try again."` |
+| `503` | The vector store could not be loaded | `"Vector store unavailable: ..."` |
+
+`/health` returns 503 with its usual body (`status: "error"` plus `detail`),
+so an uptime probe can rely on the status code alone.
 
 ---
 
@@ -143,7 +158,7 @@ Event flow, in order:
 | `retrieval` | a full `RetrieveResponse` (the chunks) | immediately, once |
 | `token` | `{"delta": "The "}` | many times, one fragment of the answer each |
 | `done` | `{"answer": "...", "answer_characters": 1086, "response_id": "...", "num_chunks": 2}` | after the last token |
-| `error` | `{"message": "..."}` | only if something fails |
+| `error` | `{"message": "..."}` | only if something fails after the stream started; `message` is the same text an error `detail` would carry |
 
 ```js
 const es = new EventSource(
@@ -157,6 +172,11 @@ es.addEventListener("error", (e) => console.error("stream failed", e));
 
 Tip: build your answer by concatenating all `delta`s; the `done` event gives you
 the authoritative final string.
+
+The status is 200 as soon as the stream starts, so a failing model provider
+shows up as an `error` event, not a 502. Only a store failure, which happens
+before the stream starts, is a real `503`. (Planned: `POST /v1/query/stream`
+will wait for the first token, so early provider failures become a real 502.)
 
 ---
 

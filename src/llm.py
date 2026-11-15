@@ -21,6 +21,18 @@ from src.logger import get_logger
 logger = get_logger(__name__)
 
 
+class UnknownModelError(ValueError):
+    """The provider or model asked for is not in ``config/providers.py``."""
+
+
+class LLMProviderError(RuntimeError):
+    """The model provider failed, or returned no answer text.
+
+    Raised during generation (``src/retrieval/generate.py``). The API maps it
+    to HTTP 502: the provider is the upstream server and it did not deliver.
+    """
+
+
 def accepts_images(provider_id: str, model_id: str) -> bool:
     """Say whether a catalogue model can read images in the prompt.
 
@@ -60,14 +72,15 @@ def create_llm(
         A LangChain chat model ready for ``invoke`` or ``stream``.
 
     Raises:
-        ValueError: If the provider or the model is not in the catalogue.
+        UnknownModelError: If the provider or the model is not in the
+            catalogue.
     """
     provider = get_provider(provider_id)
     if provider is None:
-        raise ValueError(f"Unknown provider {provider_id}")
+        raise UnknownModelError(f"Unknown provider {provider_id}")
     model = get_model(provider_id, model_id)
     if model is None:
-        raise ValueError(f"Model {model_id} not found for provider {provider_id}")
+        raise UnknownModelError(f"Model {model_id} not found for provider {provider_id}")
 
     # Some models reject a temperature (OpenAI o-series) or ignore it with a
     # warning (Gemini fixed-sampling models), so it is sent only when accepted.
