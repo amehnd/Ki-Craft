@@ -22,6 +22,7 @@ from langsmith.run_helpers import set_tracing_parent
 from config.settings import (
     GEMINI_API_KEY,
     GENERATION_INPUT_PRICE_PER_1M,
+    GENERATION_MAX_IMAGES,
     GENERATION_MAX_TOKENS,
     GENERATION_MODEL,
     GENERATION_OUTPUT_PRICE_PER_1M,
@@ -90,11 +91,10 @@ def _extract_text(content: Any) -> str:
 def _build_text_prompt(chunks: list[Document], query: str) -> str:
     """Build the text portion of the prompt from retrieved chunks.
 
-    Sends enhanced summaries as primary context, with HTML tables appended.
-    Images are sent separately via :func:`_collect_images`.
-
-    Note: only the first 5 chunks are included to keep the prompt size
-    predictable for the model.
+    Sends enhanced summaries as primary context, with HTML tables appended,
+    for every chunk given; the prompt size is set by how many chunks were
+    retrieved (``top_k``). Images are sent separately via
+    :func:`_collect_images`.
     """
     parts = [
         "You are given retrieved chunks from a technical document.\n"
@@ -111,7 +111,7 @@ def _build_text_prompt(chunks: list[Document], query: str) -> str:
         "",
     ]
 
-    for i, chunk in enumerate(chunks[:5]):
+    for i, chunk in enumerate(chunks):
         enhanced = chunk.page_content
         if enhanced:
             parts.append(f"--- Chunk {i + 1} ---")
@@ -133,11 +133,11 @@ def _build_text_prompt(chunks: list[Document], query: str) -> str:
     return "\n".join(parts)
 
 
-def _collect_images(chunks: list[Document], max_images: int = 0) -> list[dict]:
+def _collect_images(chunks: list[Document], max_images: int) -> list[dict]:
     """Collect base64 images from chunks into message content blocks.
 
-    ``max_images`` caps how many images are sent to the model.
-    0 means no limit (send all).
+    Images are taken in chunk order (all of chunk 1's, then chunk 2's, ...)
+    until ``max_images`` is reached. 0 means no limit (send all).
     """
     image_blocks: list[dict] = []
     for chunk in chunks:
@@ -153,7 +153,7 @@ def _collect_images(chunks: list[Document], max_images: int = 0) -> list[dict]:
     return image_blocks
 
 
-def _build_message_content(chunks: list[Document], query: str, max_images: int = 0) -> list[dict]:
+def _build_message_content(chunks: list[Document], query: str, max_images: int) -> list[dict]:
     """Build the full multimodal message content list (text + images).
 
     ``max_images`` caps how many images are sent to the model (0 = all).
@@ -265,7 +265,7 @@ def answer_query_stream(
     llm: BaseChatModel,
     model_id: str,
     *,
-    max_images: int = 0,
+    max_images: int = GENERATION_MAX_IMAGES,
     thinking: bool = False,
     run_tree=None,
 ) -> _StreamWrapper:
@@ -280,7 +280,7 @@ def answer_query_stream(
         query: The user's question.
         llm: The chat model to answer with (see ``src/llm.py``).
         model_id: The model's catalogue id, recorded in ``usage``.
-        max_images: Max images to send to the model (0 = all).
+        max_images: Most images to send to the model (0 = all).
         thinking: Ask the model to show its reasoning in the prompt.
 
     Returns:
@@ -318,7 +318,7 @@ def generate_answer_stream(
     model_id: str,
     *,
     usage: dict[str, Any] | None = None,
-    max_images: int = 0,
+    max_images: int = GENERATION_MAX_IMAGES,
     thinking: bool = False,
 ):
     """Stream an answer from ``llm`` for already retrieved chunks.
@@ -331,7 +331,7 @@ def generate_answer_stream(
         usage: Optional shared dict filled in place with token counts,
             latency and prompt size as the stream runs; a fresh one is used
             when omitted.
-        max_images: Max images to send to the model (0 = all).
+        max_images: Most images to send to the model (0 = all).
         thinking: Append an instruction asking for step-by-step reasoning.
 
     Yields:
@@ -347,7 +347,7 @@ def generate_answer_stream(
             total_tables = sum(c.get("table_count", 0) for c in chunk_summaries)
 
             logger.info("  %d chunks received by generation", len(chunks))
-            for ci, c in enumerate(chunks[:5]):
+            for ci, c in enumerate(chunks):
                 od = extract_original_data(c)
                 logger.debug(
                     "    Chunk %d: summary=%d chars, tables=%d, images=%d",
@@ -371,7 +371,7 @@ def generate_answer_stream(
                     "model": model_id,
                     "prompt_chars": prompt_chars,
                     "prompt_images": prompt_images,
-                    "chunks_used": min(len(chunks), 5),
+                    "chunks_used": len(chunks),
                 }
             )
 

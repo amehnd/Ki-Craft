@@ -26,6 +26,7 @@ from api.schemas import (
     QueryResponse,
     UsageMetadata,
 )
+from config.settings import GENERATION_MAX_IMAGES, RETRIEVAL_K
 from src.llm import create_llm
 
 router = APIRouter(tags=["generation"])
@@ -41,7 +42,7 @@ router = APIRouter(tags=["generation"])
         "```json\n"
         "{\n"
         "  \"query\": \"Tell me about the pin configuration of the LM317.\",\n"
-        "  \"top_k\": 10\n"
+        "  \"top_k\": 5\n"
         "}\n"
         "```\n\n"
         "Answers are grounded in the retrieved chunks; no web search is used."
@@ -95,18 +96,18 @@ async def query_stream(
         examples=QUERY_PARAM_EXAMPLES,
     ),
     top_k: int = Query(
-        10,
+        RETRIEVAL_K,
         ge=1,
         le=30,
-        description="How many chunks to retrieve from the vector store.",
-        examples=[10],
+        description="How many chunks to retrieve; all of them are sent to the model.",
+        examples=[RETRIEVAL_K],
     ),
     max_images: int = Query(
-        0,
+        GENERATION_MAX_IMAGES,
         ge=0,
         le=50,
-        description="Max images to send to the model (0 = all).",
-        examples=[10],
+        description="Most images to send to the model, taken in chunk order (0 = all).",
+        examples=[GENERATION_MAX_IMAGES],
     ),
 ) -> StreamingResponse:
     """Stream an answer over SSE.

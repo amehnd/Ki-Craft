@@ -36,7 +36,7 @@ def health() -> dict:
     return response.json()
 
 
-def retrieve(query: str, top_k: int = 10) -> dict:
+def retrieve(query: str, top_k: int = 5) -> dict:
     """Retrieve chunks only (no answer generation)."""
     response = requests.post(
         _url("/retrieve"),
@@ -47,7 +47,7 @@ def retrieve(query: str, top_k: int = 10) -> dict:
     return _absolutize_image_urls(response.json())
 
 
-def query(query: str, top_k: int = 10) -> dict:
+def query(query: str, top_k: int = 5) -> dict:
     """Retrieve chunks and generate the full answer in one call."""
     response = requests.post(
         _url("/query"),
@@ -58,7 +58,7 @@ def query(query: str, top_k: int = 10) -> dict:
     return _absolutize_image_urls(response.json())
 
 
-def stream(query: str, top_k: int = 10) -> Iterator[tuple[str, dict]]:
+def stream(query: str, top_k: int = 5) -> Iterator[tuple[str, dict]]:
     """Stream SSE events from ``/query/stream``.
 
     Yields ``(event, data)`` pairs where ``event`` is one of
@@ -92,7 +92,7 @@ def query_custom(
     api_key: str,
     temperature: float = 0.0,
     max_tokens: int = 512,
-    max_images: int = 0,
+    max_images: int = 3,
     thinking: bool = False,
 ) -> dict:
     """Query with a custom provider/model/API key via ``/query/custom``."""

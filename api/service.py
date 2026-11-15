@@ -17,7 +17,7 @@ import asyncio
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from config.settings import GENERATION_MODEL, RETRIEVAL_K
+from config.settings import GENERATION_MAX_IMAGES, GENERATION_MODEL, RETRIEVAL_K
 from src.documents import extract_original_data
 from src.embed import load_embedding_model
 from src.logger import get_logger
@@ -80,7 +80,7 @@ class RAGService:
         self,
         query: str,
         top_k: int,
-        max_images: int = 0,
+        max_images: int = GENERATION_MAX_IMAGES,
         llm: BaseChatModel | None = None,
         model_id: str | None = None,
         thinking: bool = False,
@@ -93,7 +93,7 @@ class RAGService:
         Args:
             query: The user's question.
             top_k: How many chunks to retrieve.
-            max_images: Max images to send to the model (0 = all).
+            max_images: Most images to send to the model (0 = all).
             llm: A chat model from ``src/llm.py:create_llm``; the default
                 Gemini model when omitted.
             model_id: The catalogue id of ``llm``, recorded in usage. Ignored
@@ -119,7 +119,7 @@ class RAGService:
         self,
         query: str,
         top_k: int,
-        max_images: int = 0,
+        max_images: int = GENERATION_MAX_IMAGES,
         llm: BaseChatModel | None = None,
         model_id: str | None = None,
         thinking: bool = False,

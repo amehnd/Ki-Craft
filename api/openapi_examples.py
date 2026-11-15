@@ -12,11 +12,11 @@ from __future__ import annotations
 QUERY_BODY_EXAMPLES = {
     "lm2596_pins": {
         "summary": "LM2596 pin configuration",
-        "value": {"query": "Tell me about the pin configuration of the LM2596.", "top_k": 10},
+        "value": {"query": "Tell me about the pin configuration of the LM2596.", "top_k": 5},
     },
     "lm317_pins": {
-        "summary": "LM317 pin configuration",
-        "value": {"query": "Tell me about the pin configuration of the LM317.", "top_k": 5},
+        "summary": "LM317, 10 chunks and every image",
+        "value": {"query": "Tell me about the pin configuration of the LM317.", "top_k": 10, "max_images": 0},
     },
 }
 
@@ -25,7 +25,7 @@ CUSTOM_QUERY_BODY_EXAMPLES = {
         "summary": "Custom Gemini query",
         "value": {
             "query": "Tell me about the pin configuration of the LM2596.",
-            "top_k": 10,
+            "top_k": 5,
             "provider": "gemini",
             "model": "gemini-3.5-flash-lite",
             "api_key": "YOUR_GEMINI_API_KEY",
@@ -53,7 +53,7 @@ Ask a question about the indexed PDFs. The service:
 ```json
 {
   "query": "Tell me about the pin configuration of the LM317.",
-  "top_k": 10
+  "top_k": 5
 }
 ```
 

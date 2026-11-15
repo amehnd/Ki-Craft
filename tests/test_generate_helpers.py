@@ -9,7 +9,11 @@ import pytest
 pytest.importorskip("langsmith")
 pytest.importorskip("langchain_core")
 
+from langchain_core.documents import Document
+
 from src.retrieval.generate import (
+    _build_text_prompt,
+    _collect_images,
     _capture_usage,
     _estimate_cost,
     _extract_text,
@@ -97,3 +101,33 @@ def test_trace_inputs_keep_the_question_and_drop_objects():
         }
     )
     assert recorded == {"question": "LM555 pins?", "max_images": 0, "thinking": False, "num_chunks": 2}
+
+
+def _chunk(summary: str, images: list[str]) -> Document:
+    """A chunk in the nested schema with the given base64 images."""
+    import json
+
+    return Document(
+        page_content=summary,
+        metadata={"original_content": json.dumps({"raw_text": "", "tables_html": [], "images_base64": images})},
+    )
+
+
+def test_every_retrieved_chunk_reaches_the_prompt():
+    """No hidden limit: the prompt holds as many chunks as were retrieved."""
+    chunks = [_chunk(f"summary {i}", []) for i in range(1, 8)]
+    prompt = _build_text_prompt(chunks, "q")
+    assert "--- Chunk 7 ---" in prompt and "summary 7" in prompt
+    assert "--- Chunk 8 ---" not in prompt
+
+
+def test_image_cap_takes_images_in_chunk_order():
+    """Chunk 1's images come first, then chunk 2's, until the cap."""
+    chunks = [_chunk("a", ["A1", "A2"]), _chunk("b", ["B1", "B2"]), _chunk("c", ["C1"])]
+    urls = [block["image_url"]["url"] for block in _collect_images(chunks, 3)]
+    assert urls == [f"data:image/jpeg;base64,{x}" for x in ("A1", "A2", "B1")]
+
+
+def test_image_cap_zero_sends_every_image():
+    chunks = [_chunk("a", ["A1", "A2"]), _chunk("b", ["B1"])]
+    assert len(_collect_images(chunks, 0)) == 3

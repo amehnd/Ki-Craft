@@ -12,7 +12,11 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **HNSW (Hierarchical Navigable Small World).** The index that makes nearest-neighbour search fast. It builds a layered graph of vectors and walks it towards the query instead of comparing against every vector. The result is approximate but very close to exact. Chroma and pgvector both use it.
 
-**MMR (Maximal Marginal Relevance).** A way to pick results that are relevant to the question but different from each other. Here it fetches the 20 nearest chunks and keeps 10, so the prompt does not get five copies of the same table. `src/retrieval/search.py`.
+**MMR (Maximal Marginal Relevance).** A way to pick results that are relevant to the question but different from each other. Here it fetches the 20 nearest chunks and keeps 5 (`top_k`), so the prompt does not get five copies of the same table. `src/retrieval/search.py`.
+
+**top_k.** How many chunks retrieval returns for a question. Here every returned chunk's text and tables go into the prompt, so `top_k` is also the model's context size. Default `RETRIEVAL_K` = 5; a request can override it.
+
+**Image cap (`max_images`).** The most figures sent to the model per question, taken in chunk order. Images cost far more input tokens than text, so this is the main cost control. Default `GENERATION_MAX_IMAGES` = 3; 0 sends every image.
 
 **Search type.** How the vector store picks chunks for one question, set by `RETRIEVAL_SEARCH_TYPE`. `similarity` returns the k nearest; `mmr` returns k relevant but varied chunks from a larger pool; `similarity_score_threshold` returns only chunks scoring above a cutoff. These are LangChain's three `as_retriever` options. `src/retrieval/search.py`.
 

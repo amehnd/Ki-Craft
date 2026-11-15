@@ -83,8 +83,10 @@ RETRIEVAL_SEARCH_TYPES: tuple[str, ...] = get_args(RetrievalSearchType)
 RETRIEVAL_SEARCH_TYPE: RetrievalSearchType = _env_choice(  # type: ignore[assignment]
     "RETRIEVAL_SEARCH_TYPE", "mmr", RETRIEVAL_SEARCH_TYPES
 )
-# Number of chunks to return.
-RETRIEVAL_K: int = int(os.getenv("RETRIEVAL_K", "10"))
+# Number of chunks to return. Every returned chunk's text and tables go into
+# the prompt, so this is also the model's context size. A request's top_k
+# overrides it.
+RETRIEVAL_K: int = int(os.getenv("RETRIEVAL_K", "5"))
 # mmr only: candidate pool the k chunks are chosen from.
 RETRIEVAL_FETCH_K: int = int(os.getenv("RETRIEVAL_FETCH_K", "20"))
 # mmr only: 1 ranks purely by relevance, 0 purely by diversity. 0.5 is
@@ -101,6 +103,12 @@ RETRIEVAL_SCORE_THRESHOLD: float = float(os.getenv("RETRIEVAL_SCORE_THRESHOLD", 
 # default model (gemini-3.5-flash-lite) uses fixed sampling, so this value
 # does not reach it.
 GENERATION_TEMPERATURE: float = 0.0
+
+# Most figures sent to the model per question, taken in chunk order (all of
+# chunk 1's, then chunk 2's, ...). Each image costs far more input tokens
+# than a chunk's text, so this is the main cost lever. 0 sends every image.
+# A request's max_images overrides it.
+GENERATION_MAX_IMAGES: int = int(os.getenv("GENERATION_MAX_IMAGES", "3"))
 
 # Maximum output tokens for the generation model.  Limits cost and prevents
 # runaway responses.  512 is a good balance for concise technical answers;

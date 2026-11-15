@@ -11,6 +11,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from config.settings import GENERATION_MAX_IMAGES, RETRIEVAL_K
+
 
 class QueryRequest(BaseModel):
     """A retrieval/generation request.
@@ -33,22 +35,25 @@ class QueryRequest(BaseModel):
         ],
     )
     top_k: int = Field(
-        10,
+        RETRIEVAL_K,
         ge=1,
         le=30,
-        description="How many chunks to retrieve from the vector store.",
-        examples=[10],
+        description=(
+            "How many chunks to retrieve. Every retrieved chunk's text and "
+            "tables are sent to the model, so this also sets the context size."
+        ),
+        examples=[RETRIEVAL_K],
     )
     max_images: int = Field(
-        0,
+        GENERATION_MAX_IMAGES,
         ge=0,
         le=50,
         description=(
-            "Maximum number of images to send to the model. "
-            "0 means send all retrieved images (no limit). "
-            "Lower values reduce token cost for vision-heavy documents."
+            "Most images to send to the model, taken in chunk order. "
+            "0 sends every retrieved image. Images cost far more tokens than "
+            "text, so this is the main cost control."
         ),
-        examples=[10],
+        examples=[GENERATION_MAX_IMAGES],
     )
 
 
@@ -266,11 +271,14 @@ class CustomQueryRequest(BaseModel):
         examples=["Tell me about the pin configuration of the LM2596."],
     )
     top_k: int = Field(
-        10,
+        RETRIEVAL_K,
         ge=1,
         le=30,
-        description="How many chunks to retrieve from the vector store.",
-        examples=[10],
+        description=(
+            "How many chunks to retrieve. Every retrieved chunk's text and "
+            "tables are sent to the model, so this also sets the context size."
+        ),
+        examples=[RETRIEVAL_K],
     )
     provider: str = Field(
         ...,
@@ -302,14 +310,11 @@ class CustomQueryRequest(BaseModel):
         examples=[512],
     )
     max_images: int = Field(
-        0,
+        GENERATION_MAX_IMAGES,
         ge=0,
         le=50,
-        description=(
-            "Maximum images to send to the model (0 = all). "
-            "Lower values save tokens on vision-heavy documents."
-        ),
-        examples=[10],
+        description="Most images to send to the model, taken in chunk order (0 = all).",
+        examples=[GENERATION_MAX_IMAGES],
     )
     thinking: bool = Field(
         False,

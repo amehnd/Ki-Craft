@@ -122,7 +122,7 @@ Data flow at a glance:
 Ingestion (offline):  PDF -> partition_pdf -> chunk_by_title -> vision summary per chunk
                       -> embed summary (watsonx) -> Chroma (summary as page_content,
                       raw_text/tables_html/image_paths as metadata) + images on disk
-Query (online):       question -> embed -> Chroma MMR (k=10 of 20) -> rebuild text,
+Query (online):       question -> embed -> Chroma MMR (k=5 of 20) -> rebuild text,
                       tables, images from metadata -> multimodal prompt -> Gemini -> answer
 ```
 
@@ -207,7 +207,7 @@ Each checkpoint is a set of small commits. Finish one, let the owner test and pu
 **Checkpoint 2. Backend structure.**
 - Split `api/main.py` into `api/routers/system.py`, `retrieval.py`, `query.py`, `images.py`. `main.py` keeps only app creation, CORS, the lifespan, and `include_router` calls.
 - Merge the default and custom generation paths into one function that receives an LLM.
-- Fix the prompt so the text of every retrieved chunk reaches it, not only the first 5, while images already come from all chunks. Moved here from Checkpoint 3 on 2026-11-14: figure labels (`[F1]`) must not point at chunks whose text the model never saw, and after the merge the fix is in one place.
+- Remove the hidden 5-chunk limit. Moved here from Checkpoint 3 on 2026-11-14. Decided 2026-11-15: `top_k` is what the model gets (every retrieved chunk's text and tables), default 5 (was 10); figures are capped at an absolute count, `GENERATION_MAX_IMAGES` = 3, taken in chunk order; both are settings a request can override. The search type (`similarity`, `mmr`, `similarity_score_threshold`) and its parameters are settings too. Re-ranking (for example, pool 20 and re-rank to 5) waits until the evaluation results show it is needed.
 - Apply the agreed API changes, including the `/v1` prefix (see Decisions made). These are breaking, so update `app/api_client.py` and `API.md` in the same checkpoint.
 - Replace `_create_llm_for_model` in `api/custom_service.py` with a factory in `src/` that chooses the client by provider id, not by model-name prefix. Every provider's `base_url` lives in `config/providers.py`, including Groq's. An unknown provider is rejected instead of silently going to Groq.
 - Prune the model catalogue. On 2026-11-13, 5 of the 9 Groq models listed (`llama-3.3-70b-versatile`, `llama-3.1-8b-instant`, `qwen/qwen3.6-27b`, `groq/compound`, `groq/compound-mini`) returned 404 for the owner's key. Consider checking against each provider's `/models` endpoint.
@@ -219,7 +219,7 @@ Each checkpoint is a set of small commits. Finish one, let the owner test and pu
 - Docstrings everywhere, remove all banner comments (about 75).
 - Split `src/retrieval/generate.py` into prompt building, the LLM factory, and streaming.
 - Fix:
-  - only the first 5 chunks' text reaches the prompt while images come from all chunks (moved to Checkpoint 2 on 2026-11-14);
+  - only the first 5 chunks' text reaches the prompt while images come from all chunks (moved to Checkpoint 2 on 2026-11-14, done 2026-11-15);
   - streamed usage tokens reporting 0;
   - cost estimates hardcoded to Gemini prices.
 
@@ -229,6 +229,7 @@ Each checkpoint is a set of small commits. Finish one, let the owner test and pu
 - Serve dataset browsing through the API instead of reading `json/` directly.
 - Split `app/dashboard.py` into Streamlit pages plus shared components.
 - Show the `figures` strip under each answer, with the figures the answer cites (`[F1]`) shown first.
+- Send the sidebar's Max Images in default mode too. Found 2026-11-15: without a custom provider the dashboard calls `/query/stream` with `top_k` only (`app/dashboard.py`, `api_stream(...)`), so the Max Images input is ignored and the server default `GENERATION_MAX_IMAGES` (3) applies. Only custom-provider mode sends it.
 
 **Checkpoint 5. Evaluation baseline.**
 - Turn `evals/testing.json` into a small golden set covering text, table, figure, and "not stated" questions per document. The agent drafts each question with its expected answer and page; the owner reviews every one.

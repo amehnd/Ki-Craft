@@ -126,10 +126,10 @@ PIPELINE_STEPS: list[tuple[str, str, str, list[str]]] = [
         "Vector storage and diversity-aware retrieval",
         "Each chunk — enhanced content, raw text, tables and images — is embedded with "
         "Granite embeddings and persisted to <b>ChromaDB</b> using cosine similarity over HNSW. "
-        "Retrieval uses <b>MMR</b> (top-10 answers from a 20-chunk candidate pool) so results "
-        "are relevant <i>and</i> diverse instead of ten near-duplicate paragraphs. The same "
+        "Retrieval uses <b>MMR</b> (the top 5 from a 20-chunk candidate pool) so results "
+        "are relevant <i>and</i> diverse instead of near-duplicate paragraphs. The same "
         "chunks are exported to JSON, which is what powers the inspector pages.",
-        ["Granite embeddings", "ChromaDB", "cosine HNSW", "MMR k=10 / fetch_k=20"],
+        ["Granite embeddings", "ChromaDB", "cosine HNSW", "MMR k=5 / fetch_k=20"],
     ),
     (
         "Step 04",
@@ -145,11 +145,11 @@ PIPELINE_STEPS: list[tuple[str, str, str, list[str]]] = [
         "Step 05",
         "Grounded multimodal query &amp; retrieve",
         "The <b>FastAPI</b> backend runs embed → search → context assembly → generation. The "
-        "top-10 relevant chunks are passed to the generation model together with their actual "
+        "top-5 relevant chunks are passed to the generation model together with their actual "
         "images and tables, not as flattened text, so answers can describe a pinout or read a "
         "curve. Answers stream back over SSE, with token usage, latency and estimated cost. "
         "Any provider and model can be selected in the sidebar with <b>Bring Your Own API Key</b>.",
-        ["Top-10 chunks", "BYO API key", "Gemini / Groq / OpenAI / HF", "thinking mode"],
+        ["Top-5 chunks", "BYO API key", "Gemini / Groq / OpenAI / HF", "thinking mode"],
     ),
     (
         "Step 06",
@@ -228,7 +228,7 @@ MERMAID_NODE_NOTES: dict[str, str] = {
     "JSONF": "The same chunks exported as JSON &mdash; this is what the Chunk "
     "Inspector and Dataset Analytics read.",
     "EMB": "The query is embedded with the same Granite model used at ingestion.",
-    "MMR": "Maximal Marginal Relevance picks 10 chunks from a 20-chunk candidate "
+    "MMR": "Maximal Marginal Relevance picks 5 chunks from a 20-chunk candidate "
     "pool, balancing relevance against redundancy.",
     "PROMPT": "The retrieved chunks are assembled into one multimodal context: text, "
     "tables and the real images.",
@@ -961,19 +961,19 @@ def render_sidebar() -> None:
                 "Max Images",
                 min_value=0,
                 max_value=50,
-                value=0,
+                value=3,
                 step=1,
                 key="llm_max_images",
-                help="Max images to send to the model. 0 = all.",
+                help="Most images to send to the model, in chunk order. 0 = all.",
             )
             st.number_input(
                 "Retrieved Chunks",
                 min_value=1,
                 max_value=30,
-                value=10,
+                value=5,
                 step=1,
                 key="llm_top_k",
-                help="How many chunks to retrieve from the vector store.",
+                help="How many chunks to retrieve; all of them are sent to the model.",
             )
 
             st.checkbox(
@@ -1582,7 +1582,7 @@ def render_chat_page() -> None:
                 api_key = st.session_state.get("llm_api_key")
                 temperature = st.session_state.get("llm_temperature", 0.0)
                 max_tokens = st.session_state.get("llm_max_tokens", 512)
-                max_images = st.session_state.get("llm_max_images", 0)
+                max_images = st.session_state.get("llm_max_images", 3)
                 thinking = st.session_state.get("llm_thinking", False)
 
                 if not (provider and model and api_key):
@@ -1595,7 +1595,7 @@ def render_chat_page() -> None:
                 with st.spinner("Retrieving chunks and generating answer..."):
                     result = query_custom(
                         query=query,
-                        top_k=st.session_state.get("llm_top_k", 10),
+                        top_k=st.session_state.get("llm_top_k", 5),
                         provider=provider,
                         model=model,
                         api_key=api_key,
@@ -1628,7 +1628,7 @@ def render_chat_page() -> None:
 
             else:
                 # Default backend mode - use streaming
-                events = api_stream(query, top_k=st.session_state.get("llm_top_k", 10))
+                events = api_stream(query, top_k=st.session_state.get("llm_top_k", 5))
                 status = st.status("Retrieving relevant chunks ...", expanded=True)
                 answer_placeholder = st.empty()
                 collected: list[str] = []
@@ -1863,7 +1863,7 @@ def _render_how_to_explore() -> None:
         ),
         (
             "Query &amp; Retrieve",
-            "Ask a question and watch the backend retrieve the top-10 chunks and "
+            "Ask a question and watch the backend retrieve the top-5 chunks and "
             "stream a grounded answer. Expand any retrieved chunk to see the exact "
             "text, tables and images the model was given, then check token usage, "
             "latency and estimated cost. Choose any provider, model or Thinking Mode "

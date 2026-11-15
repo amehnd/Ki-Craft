@@ -17,7 +17,7 @@ A chosen option is not frozen. When an agent works on that area it should still 
 
 Ingestion is offline. A PDF is partitioned into elements (text, tables, images) by `unstructured`. The elements are grouped into chunks by section title, and a vision LLM writes one searchable summary per chunk. Only the summary is embedded (IBM watsonx Granite, 768 dimensions) and stored in Chroma. The original text, the tables (as HTML), and the image paths ride along as metadata.
 
-At query time the question is embedded and Chroma returns 10 diverse chunks (MMR over 20 candidates). The original text, tables, and images are rebuilt from metadata and sent to Gemini as a multimodal prompt. FastAPI serves this as `/retrieve`, `/query`, `/query/stream` (SSE), and `/query/custom`, and Streamlit is the UI.
+At query time the question is embedded and Chroma returns 5 diverse chunks (MMR over 20 candidates). The original text, tables, and images are rebuilt from metadata and sent to Gemini as a multimodal prompt. FastAPI serves this as `/retrieve`, `/query`, `/query/stream` (SSE), and `/query/custom`, and Streamlit is the UI.
 
 The central design idea is **index the summary, answer from the original**. Summaries are good for matching questions. Originals are good for exact numbers.
 
@@ -182,7 +182,7 @@ Verification: run the evaluation set against Chroma and against pgvector. Identi
 
 ## 6. Retrieval
 
-**Today:** MMR with `k=10` and `fetch_k=20` (`src/retrieval/search.py`). The search type is a setting (`RETRIEVAL_SEARCH_TYPE`: `similarity`, `mmr`, or `similarity_score_threshold`), and each type's parameters are environment variables, so the evaluation set can compare them without code changes. The prompt then uses the text of only the first 5 chunks but the images of all 10; Checkpoint 2 replaces that hidden limit with `top_k` and an image cap.
+**Today:** MMR with `k=5` and `fetch_k=20` (`src/retrieval/search.py`). The search type is a setting (`RETRIEVAL_SEARCH_TYPE`: `similarity`, `mmr`, or `similarity_score_threshold`), and each type's parameters are environment variables, so the evaluation set can compare them without code changes. Every retrieved chunk's text and tables reach the prompt, so `top_k` (default 5) is the context size, and at most `max_images` figures (default 3) are sent, in chunk order. Until 2026-11-15 the prompt silently used the text of only the first 5 of 10 chunks but the images of all 10.
 
 | Option | Strengths | Weaknesses |
 |---|---|---|
@@ -207,7 +207,7 @@ For datasheets, hybrid search is the most valuable addition, because questions c
 
 **Status:**
 - Search type configurable (Checkpoint 2, done).
-- Replace the hidden 5-chunk limit with `top_k` and an image cap (Checkpoint 2).
+- Replace the hidden 5-chunk limit with `top_k` and an image cap (Checkpoint 2, done).
 - Add document filtering (Checkpoint 7).
 - Add hybrid search after the migration.
 

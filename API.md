@@ -29,7 +29,7 @@ supporting evidence: the exact document chunks, their tables, and their figures.
 
 There are only **three shapes** you need to understand:
 
-1. **Request** — always the same: `{"query": "...", "top_k": 10}`.
+1. **Request** — always the same: `{"query": "...", "top_k": 5, "max_images": 3}` (both optional).
 2. **`RetrieveResponse`** — the chunks + everything they contain.
 3. **`QueryResponse`** — the same, plus `answer` and `answer_characters`.
 
@@ -42,17 +42,18 @@ Both `/retrieve` and `/query` take the same JSON body:
 ```json
 {
   "query": "Tell me about the pin configuration of the LM317.",
-  "top_k": 10
+  "top_k": 5
 }
 ```
 
 | Field | Type | Rules | Meaning |
 |---|---|---|---|
 | `query` | string | 1–2000 chars | The question you want answered |
-| `top_k` | integer | 1–30, default 10 | How many document chunks to fetch. More chunks = more evidence (and more images/tables), but slower. |
+| `top_k` | integer | 1–30, default 5 | How many document chunks to fetch. Every fetched chunk's text and tables go to the model, so more chunks = more evidence, but a longer prompt. |
+| `max_images` | integer | 0–50, default 3 | Most figures sent to the model, taken in chunk order. 0 sends every image. Images cost far more tokens than text. |
 
-`top_k` is the only knob. Start with the default; raise it if answers miss
-context, lower it if you need speed.
+Start with the defaults; raise `top_k` if answers miss context, and raise
+`max_images` (or set 0) for questions about graphs and diagrams.
 
 ---
 
@@ -127,7 +128,7 @@ the data around, URLs when you want clean, lightweight JSON.
 
 ## 4. Streaming the answer (`/query/stream`)
 
-`GET /query/stream?query=...&top_k=10` is the same as `/query` but the answer
+`GET /query/stream?query=...&top_k=5` is the same as `/query` but the answer
 arrives as you type it. It's a standard **Server-Sent Events** stream
 (`Content-Type: text/event-stream`), so in the browser you can use
 `EventSource` directly — no library needed.

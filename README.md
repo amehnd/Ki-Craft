@@ -82,7 +82,7 @@ flowchart TB
         direction TB
         Q["question"]
         EMBED_Q["src/embed.py<br/>embed the question"]
-        MMR["search.py<br/>MMR, keep 10 of 20"]
+        MMR["search.py<br/>MMR, keep 5 of 20"]
         REBUILD["src/documents.py<br/>rebuild text, tables, figures"]
         GEN["generate.py<br/>multimodal prompt, Gemini 3.5 Flash-Lite"]
         ANSWER["answer"]
@@ -385,8 +385,9 @@ Every tunable lives in `config/settings.py`.
 | `EMBEDDING_MAX_INPUT_TOKENS` | `512` | The model's input limit; longer text is truncated |
 | `GENERATION_MODEL` | `gemini-3.5-flash-lite` | Default answer model |
 | `GENERATION_MAX_TOKENS` | `512` | Output limit per answer (environment variable) |
+| `GENERATION_MAX_IMAGES` | `3` | Most figures sent to the model, in chunk order; 0 sends all (environment variable) |
 | `RETRIEVAL_SEARCH_TYPE` | `mmr` | `similarity`, `mmr`, or `similarity_score_threshold` (environment variable; anything else stops startup) |
-| `RETRIEVAL_K` | `10` | Chunks returned (environment variable) |
+| `RETRIEVAL_K` | `5` | Chunks returned; all of them go to the model (environment variable) |
 | `RETRIEVAL_FETCH_K` | `20` | MMR only: candidates fetched before MMR picks `RETRIEVAL_K` (environment variable) |
 | `RETRIEVAL_LAMBDA_MULT` | `0.5` | MMR only: 1 is pure relevance, 0 is pure diversity (environment variable) |
 | `RETRIEVAL_SCORE_THRESHOLD` | `0.5` | `similarity_score_threshold` only: minimum relevance score (environment variable) |

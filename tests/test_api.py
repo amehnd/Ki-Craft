@@ -247,6 +247,19 @@ def test_query_returns_answer_and_usage(client, backend):
     assert content[1]["type"] == "image_url"
 
 
+def test_query_defaults_come_from_settings(client, backend):
+    """Without top_k or max_images the settings decide, and every chunk is used."""
+    from config.settings import GENERATION_MAX_IMAGES, RETRIEVAL_K
+
+    body = client.post("/query", json={"query": "LM317 pins"}).json()
+    assert body["num_chunks"] == min(RETRIEVAL_K, 2)
+    assert body["usage"]["chunks_used"] == body["num_chunks"]
+    assert body["usage"]["prompt_images"] <= GENERATION_MAX_IMAGES
+
+    prompt = backend.prompts[0][0].content[0]["text"]
+    assert "--- Chunk 2 ---" in prompt
+
+
 def test_query_llm_failure_becomes_answer_text(client, backend):
     """An LLM failure is returned as a 200 whose answer is an apology.
 
