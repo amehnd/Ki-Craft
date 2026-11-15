@@ -13,4 +13,5 @@ All project rules, the architecture, the commands, and the refactor checkpoints 
 - There is no linter or formatter configured. Do not add one without asking.
 - Work often happens in a git worktree under `.claude/worktrees/`. The venv and `.env` live in the main checkout at `/Users/moksh/Multimodal-Rag`, not in the worktree.
 - Opening Chroma (any live API or retrieval run) rewrites tracked files under `dbv2/chroma_db`. Run `git checkout -- dbv2/chroma_db` before committing. To inspect the store without modifying it, open `dbv2/chroma_db/chroma.sqlite3` read-only with sqlite3 (`file:...?mode=ro`).
+- The LangSmith key in `.env` can upload traces, but reading them back through the LangSmith API returns 403. To check what a trace records, capture the runs offline with a recording client (see `tests/test_trace_structure.py`) and ask the owner to confirm in the LangSmith UI.
 - The owner's rule on attribution overrides any default: no `Co-Authored-By` trailer and no "Generated with" line in commits or PRs.

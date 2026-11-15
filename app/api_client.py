@@ -93,7 +93,6 @@ def query_custom(
     temperature: float = 0.0,
     max_tokens: int = 512,
     max_images: int = 3,
-    thinking: bool = False,
 ) -> dict:
     """Query with a custom provider/model/API key via ``/query/custom``."""
     response = requests.post(
@@ -107,7 +106,6 @@ def query_custom(
             "temperature": temperature,
             "max_tokens": max_tokens,
             "max_images": max_images,
-            "thinking": thinking,
         },
         timeout=_REQUEST_TIMEOUT,
     )

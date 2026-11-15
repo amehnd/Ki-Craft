@@ -176,7 +176,6 @@ async def query_custom(
             req.api_key,
             temperature=req.temperature,
             max_tokens=req.max_tokens,
-            thinking=req.thinking,
         )
         answer, base, usage = await request.app.state.service.answer(
             req.query,
@@ -184,7 +183,6 @@ async def query_custom(
             req.max_images,
             llm=llm,
             model_id=req.model,
-            thinking=req.thinking,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))

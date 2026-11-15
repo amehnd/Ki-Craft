@@ -84,7 +84,6 @@ class RAGService:
         max_images: int = GENERATION_MAX_IMAGES,
         llm: BaseChatModel | None = None,
         model_id: str | None = None,
-        thinking: bool = False,
     ) -> Iterator[StreamEvent]:
         """Retrieve chunks and return the answer as a stream of events.
 
@@ -99,7 +98,6 @@ class RAGService:
                 Gemini model when omitted.
             model_id: The catalogue id of ``llm``, recorded in usage. Ignored
                 when ``llm`` is omitted.
-            thinking: Ask the model to show its reasoning.
 
         Returns:
             The generator from ``answer_query_stream``: ``("chunks", ...)``,
@@ -114,7 +112,6 @@ class RAGService:
             llm,
             model_id,
             max_images=max_images,
-            thinking=thinking,
         )
 
     async def answer(
@@ -124,7 +121,6 @@ class RAGService:
         max_images: int = GENERATION_MAX_IMAGES,
         llm: BaseChatModel | None = None,
         model_id: str | None = None,
-        thinking: bool = False,
     ) -> tuple[str, RetrieveResponse, dict]:
         """Retrieve chunks and generate a full answer.
 
@@ -141,7 +137,7 @@ class RAGService:
             chunks: list = []
             tokens: list[str] = []
             usage: dict = {}
-            for kind, value in self.stream_answer(query, top_k, max_images, llm, model_id, thinking):
+            for kind, value in self.stream_answer(query, top_k, max_images, llm, model_id):
                 if kind == "chunks":
                     chunks = value
                 elif kind == "token":

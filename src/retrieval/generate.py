@@ -221,7 +221,6 @@ def _trace_inputs(inputs: dict) -> dict:
     recorded = {
         "question": inputs.get("query"),
         "max_images": inputs.get("max_images"),
-        "thinking": inputs.get("thinking"),
     }
     if "chunks" in inputs:
         recorded["num_chunks"] = len(inputs["chunks"])
@@ -258,7 +257,6 @@ def answer_query_stream(
     model_id: str,
     *,
     max_images: int = GENERATION_MAX_IMAGES,
-    thinking: bool = False,
     run_tree=None,
 ) -> Iterator[StreamEvent]:
     """Retrieve chunks then stream an answer under a single LangSmith trace.
@@ -275,7 +273,6 @@ def answer_query_stream(
         llm: The chat model to answer with (see ``src/llm.py``).
         model_id: The model's catalogue id, recorded in ``usage``.
         max_images: Most images to send to the model (0 = all).
-        thinking: Ask the model to show its reasoning in the prompt.
 
     Yields:
         ``("chunks", list[Document])`` once, as soon as retrieval finishes;
@@ -296,7 +293,6 @@ def answer_query_stream(
         model_id,
         usage=usage,
         max_images=max_images,
-        thinking=thinking,
     ):
         yield "token", token
     yield "usage", usage
@@ -316,7 +312,6 @@ def generate_answer_stream(
     *,
     usage: dict[str, Any] | None = None,
     max_images: int = GENERATION_MAX_IMAGES,
-    thinking: bool = False,
 ) -> Iterator[str]:
     """Stream an answer from ``llm`` for already retrieved chunks.
 
@@ -333,7 +328,6 @@ def generate_answer_stream(
             latency and prompt size as the stream runs; a fresh one is used
             when omitted.
         max_images: Most images to send to the model (0 = all).
-        thinking: Append an instruction asking for step-by-step reasoning.
 
     Yields:
         Answer token strings.
@@ -358,12 +352,6 @@ def generate_answer_stream(
             )
 
         message_content = _build_message_content(chunks, query, max_images)
-        if thinking:
-            message_content[0]["text"] += (
-                "\n\nBefore answering, show your reasoning step-by-step "
-                "wrapped in <think> and <think> tags. "
-                "Then provide your final answer after the </think> tag."
-            )
 
         prompt_chars, prompt_images = _prompt_stats(message_content)
         usage.update(

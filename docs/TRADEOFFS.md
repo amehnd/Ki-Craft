@@ -222,15 +222,17 @@ For datasheets, hybrid search is the most valuable addition, because questions c
 | Local VLM | Private | Slow on a laptop; weak at long multimodal prompts |
 | Calculations in code (tool calls) | Exact arithmetic with units | Needs a tool loop; belongs to a later phase |
 
-Images are expensive in tokens. `max_images` exists to cap them. Sending figures only when the question looks visual ("graph", "curve", "figure", "pinout") is a cheap improvement.
+Images are expensive in tokens. `max_images` caps them (default 3, `GENERATION_MAX_IMAGES`). Sending figures only when the question looks visual ("graph", "curve", "figure", "pinout") is a cheap improvement.
 
-The custom-provider path duplicates the default path today. Both become one function that receives an LLM object (see section 8).
+The default and custom-provider paths are one function that receives an LLM object (`answer_query_stream`, merged 2026-11-15).
 
-**How to defend it:** "Temperature 0 because this is lookup, not creativity. A small multimodal model because most questions are retrieval-bound: if the right table is in the prompt, a small model reads it correctly. The provider is injectable so the same pipeline can be evaluated against several models."
+**Reasoning control (dropped 2026-11-15, deferred).** Many current models can "think" before answering. `/query/custom` used to ask for it with a prompt instruction (`<think>` tags), which does not change how the model works and only adds text, so the option was removed and each provider's default applies. The real control is each provider's native setting, which LangChain exposes as one parameter, `reasoning_effort`, with different allowed values per model (findings in `AGENTS.md`, Checkpoint 2). Reasoning tokens count against `max_tokens`, so a 512-token budget can leave no room for the answer. For lookup questions over a datasheet, little or no reasoning is the right default; calculations (for example, a resistor value from a formula) are where it would pay off, and the evaluation set should show whether it is needed.
+
+**How to defend it:** "Low randomness because this is lookup, not creativity (the default model fixes its own sampling, so no temperature is sent). A small multimodal model because most questions are retrieval-bound: if the right table is in the prompt, a small model reads it correctly. The provider is injectable so the same pipeline can be evaluated against several models."
 
 **Owner (2026-11-13):** Gemini Flash-Lite works well enough; do not change the default model now.
 
-**Status:** merge the two paths (Checkpoint 2).
+**Status:** the two paths are merged (Checkpoint 2, done). The `thinking` option is dropped (Checkpoint 2, done); native reasoning control is deferred.
 
 ## 8. API layer
 

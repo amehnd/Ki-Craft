@@ -97,10 +97,9 @@ def test_trace_inputs_keep_the_question_and_drop_objects():
             "model_id": "gemini-3.5-flash-lite",
             "chunks": ["a", "b"],
             "max_images": 0,
-            "thinking": False,
         }
     )
-    assert recorded == {"question": "LM555 pins?", "max_images": 0, "thinking": False, "num_chunks": 2}
+    assert recorded == {"question": "LM555 pins?", "max_images": 0, "num_chunks": 2}
 
 
 def _chunk(summary: str, images: list[str]) -> Document:

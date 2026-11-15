@@ -67,15 +67,19 @@ def test_o_series_model_gets_no_temperature(built):
     assert "temperature" not in built["kwargs"]
 
 
-@pytest.mark.parametrize(("thinking", "effort"), [(False, "none"), (True, "default")])
-def test_groq_thinking_sets_reasoning_effort(built, thinking, effort):
-    llm.create_llm("groq", "openai/gpt-oss-20b", "key", thinking=thinking)
-    assert built["kwargs"]["model_kwargs"] == {"reasoning_effort": effort}
+@pytest.mark.parametrize(
+    ("provider", "model"),
+    [("groq", "openai/gpt-oss-20b"), ("groq", "qwen/qwen3.8-27b"), ("openai", "gpt-4o")],
+)
+def test_no_reasoning_setting_is_sent(built, provider, model):
+    """Each provider's own reasoning default applies.
 
-
-def test_non_groq_provider_gets_no_reasoning_effort(built):
-    llm.create_llm("openai", "gpt-4o", "key", thinking=True)
-    assert built["kwargs"]["model_kwargs"] == {}
+    Groq GPT-OSS accepts only low, medium, or high, so the "none" this
+    factory used to send to every Groq model was not a valid value for it.
+    """
+    llm.create_llm(provider, model, "key")
+    assert "model_kwargs" not in built["kwargs"]
+    assert "reasoning_effort" not in built["kwargs"]
 
 
 def test_unknown_provider_is_rejected(built):

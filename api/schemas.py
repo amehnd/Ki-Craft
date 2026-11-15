@@ -316,13 +316,6 @@ class CustomQueryRequest(BaseModel):
         description="Most images to send to the model, taken in chunk order (0 = all).",
         examples=[GENERATION_MAX_IMAGES],
     )
-    thinking: bool = Field(
-        False,
-        description=(
-            "When true, asks the model to output its reasoning in <think> tags. "
-            "Works with models that support chain-of-thought (DeepSeek R1, QwQ, etc.)."
-        ),
-    )
 
 
 class CustomQueryResponse(QueryResponse):

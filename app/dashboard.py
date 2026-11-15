@@ -9,7 +9,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import json
 import base64
 import io
-import re
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -149,7 +148,7 @@ PIPELINE_STEPS: list[tuple[str, str, str, list[str]]] = [
         "images and tables, not as flattened text, so answers can describe a pinout or read a "
         "curve. Answers stream back over SSE, with token usage, latency and estimated cost. "
         "Any provider and model can be selected in the sidebar with <b>Bring Your Own API Key</b>.",
-        ["Top-5 chunks", "BYO API key", "Gemini / Groq / OpenAI / HF", "thinking mode"],
+        ["Top-5 chunks", "BYO API key", "Gemini / Groq / OpenAI / HF"],
     ),
     (
         "Step 06",
@@ -816,18 +815,6 @@ def _on_filter_change() -> None:
     st.session_state.filtered_indices = None
 
 
-def _parse_thinking(text: str) -> tuple[str, str]:
-    """Extract <think>...</think> blocks from text.
-
-    Returns (thinking_text, answer_text).
-    """
-    pattern = r"<think>(.*?)</think>"
-    matches = re.findall(pattern, text, re.DOTALL)
-    thinking = "\n\n".join(m.strip() for m in matches)
-    answer = re.sub(pattern, "", text, flags=re.DOTALL).strip()
-    return thinking, answer
-
-
 def render_sidebar() -> None:
     with st.sidebar:
         st.header("Data")
@@ -980,11 +967,6 @@ def render_sidebar() -> None:
                 "Use Custom Provider",
                 key="use_custom_provider",
                 help="When checked, queries use the selected provider/model/key instead of the default backend",
-            )
-            st.checkbox(
-                "Thinking Mode",
-                key="llm_thinking",
-                help="Ask the model to show its reasoning. Thinking is displayed separately from the answer.",
             )
 
 
@@ -1583,7 +1565,6 @@ def render_chat_page() -> None:
                 temperature = st.session_state.get("llm_temperature", 0.0)
                 max_tokens = st.session_state.get("llm_max_tokens", 512)
                 max_images = st.session_state.get("llm_max_images", 3)
-                thinking = st.session_state.get("llm_thinking", False)
 
                 if not (provider and model and api_key):
                     st.error("Please select provider, model, and enter API key for custom provider mode.")
@@ -1602,7 +1583,6 @@ def render_chat_page() -> None:
                         temperature=temperature,
                         max_tokens=max_tokens,
                         max_images=max_images,
-                        thinking=thinking,
                     )
 
                 retrieval = result
@@ -1616,12 +1596,7 @@ def render_chat_page() -> None:
                 _render_retrieval(retrieval)
 
                 answer = result.get("answer", "")
-                # Parse <think> tags from the answer
-                thinking_text, answer_text = _parse_thinking(answer)
-                if thinking_text:
-                    with st.expander("Thinking", expanded=False):
-                        st.markdown(thinking_text)
-                answer_placeholder.markdown(f"### Answer\n\n{answer_text}")
+                answer_placeholder.markdown(f"### Answer\n\n{answer}")
                 st.session_state.chat_answer = answer
                 st.session_state.chat_usage = result.get("usage")
                 _render_usage(result.get("usage"))
@@ -1632,8 +1607,6 @@ def render_chat_page() -> None:
                 status = st.status("Retrieving relevant chunks ...", expanded=True)
                 answer_placeholder = st.empty()
                 collected: list[str] = []
-                thinking_collected: list[str] = []
-                in_thinking = False
 
                 for event, data in events:
                     if event == "retrieval":
@@ -1647,33 +1620,11 @@ def render_chat_page() -> None:
                         )
                         _render_retrieval(retrieval)
                     elif event == "token":
-                        delta = data.get("delta", "")
-                        # Parse <think> tags dynamically
-                        for char in delta:
-                            collected.append(char)
-                            full = "".join(collected)
-                            # Detect state transitions
-                            if not in_thinking and "<think>" in full and "</think>" not in full:
-                                in_thinking = True
-                                thinking_collected = []
-                            if in_thinking:
-                                thinking_text = "".join(thinking_collected)
-                                # Check if we just got the closing tag
-                                if "</think>" in thinking_text + char:
-                                    in_thinking = False
-                                    thinking_collected = []
-                                else:
-                                    thinking_collected.append(char)
-                        # Show answer (without <think> tags) with cursor
-                        _, answer_so_far = _parse_thinking("".join(collected))
-                        answer_placeholder.markdown(f"### Answer\n\n{answer_so_far}▌")
+                        collected.append(data.get("delta", ""))
+                        answer_placeholder.markdown(f"### Answer\n\n{''.join(collected)}▌")
                     elif event == "done":
                         full_answer = data.get("answer", "")
-                        thinking_text, answer_text = _parse_thinking(full_answer)
-                        if thinking_text:
-                            with st.expander("Thinking", expanded=False):
-                                st.markdown(thinking_text)
-                        answer_placeholder.markdown(f"### Answer\n\n{answer_text}")
+                        answer_placeholder.markdown(f"### Answer\n\n{full_answer}")
                         st.session_state.chat_answer = full_answer
                         st.session_state.chat_usage = data.get("usage")
                         _render_usage(data.get("usage"))
@@ -1866,7 +1817,7 @@ def _render_how_to_explore() -> None:
             "Ask a question and watch the backend retrieve the top-5 chunks and "
             "stream a grounded answer. Expand any retrieved chunk to see the exact "
             "text, tables and images the model was given, then check token usage, "
-            "latency and estimated cost. Choose any provider, model or Thinking Mode "
+            "latency and estimated cost. Choose any provider or model "
             "in the sidebar &mdash; or enable <i>Use Custom Provider</i> and bring "
             "your own API key.",
         ),

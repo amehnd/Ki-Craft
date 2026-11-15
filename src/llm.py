@@ -28,7 +28,6 @@ def create_llm(
     *,
     temperature: float = 0.0,
     max_tokens: int = 512,
-    thinking: bool = False,
 ) -> BaseChatModel:
     """Build the chat model for one provider and model from the catalogue.
 
@@ -40,8 +39,6 @@ def create_llm(
         temperature: Sampling temperature. Sent only when the model's
             catalogue entry accepts it; otherwise the provider default applies.
         max_tokens: Maximum output tokens.
-        thinking: Groq only: sets ``reasoning_effort`` to ``default`` when
-            true and ``none`` when false.
 
     Returns:
         A LangChain chat model ready for ``invoke`` or ``stream``.
@@ -69,14 +66,10 @@ def create_llm(
             **sampling,
         )
 
-    extra: dict = {}
-    if provider.id == "groq":
-        extra["reasoning_effort"] = "default" if thinking else "none"
     return ChatOpenAI(
         model=model_id,
         api_key=api_key,
         base_url=provider.base_url,
         max_tokens=max_tokens,
-        model_kwargs=extra,
         **sampling,
     )
