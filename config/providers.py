@@ -2,7 +2,7 @@
 
 Central place to define available providers, their models, and metadata
 (pricing, context window, capabilities).  Used by the dashboard dropdown,
-the backend /v1/query/custom endpoint, and the chat model factory in
+the optional ``llm`` object of ``POST /v1/query``, and the chat model factory in
 ``src/llm.py``, which only builds models listed here.
 """
 
@@ -42,7 +42,6 @@ class ProviderInfo:
     """Metadata for a provider."""
     id: str                    # short key: "gemini", "groq", "huggingface", "openai"
     display_name: str          # "Google Gemini", "Groq", "Hugging Face", "OpenAI"
-    api_key_env: str           # env var name for default key (e.g. "GEMINI_API_KEY")
     # Wire protocol, which picks the LangChain client in src/llm.py: "gemini"
     # for Google's API, "openai" for any OpenAI-compatible chat API.
     protocol: Literal["gemini", "openai"]
@@ -358,7 +357,6 @@ ALL_PROVIDERS: tuple[ProviderInfo, ...] = (
     ProviderInfo(
         id="gemini",
         display_name="Google Gemini",
-        api_key_env="GEMINI_API_KEY",
         protocol="gemini",
         models=GEMINI_MODELS,
         description="Google's multimodal models with 1M context, free tier available",
@@ -366,7 +364,6 @@ ALL_PROVIDERS: tuple[ProviderInfo, ...] = (
     ProviderInfo(
         id="groq",
         display_name="Groq",
-        api_key_env="GROQ_API_KEY",
         protocol="openai",
         base_url="https://api.groq.com/openai/v1",
         models=GROQ_MODELS,
@@ -375,7 +372,6 @@ ALL_PROVIDERS: tuple[ProviderInfo, ...] = (
     ProviderInfo(
         id="huggingface",
         display_name="Hugging Face (Inference Providers)",
-        api_key_env="HF_TOKEN",
         protocol="openai",
         base_url="https://router.huggingface.co/v1",
         models=HF_MODELS,
@@ -384,7 +380,6 @@ ALL_PROVIDERS: tuple[ProviderInfo, ...] = (
     ProviderInfo(
         id="openai",
         display_name="OpenAI",
-        api_key_env="OPENAI_API_KEY",
         protocol="openai",
         models=OPENAI_MODELS,
         description="Proprietary frontier models (GPT-4o, o1, GPT-5 series)",

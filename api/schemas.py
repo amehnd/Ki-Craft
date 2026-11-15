@@ -9,13 +9,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from config.settings import GENERATION_MAX_IMAGES, RETRIEVAL_K
 
 
-class QueryRequest(BaseModel):
-    """A retrieval/generation request.
+class RetrieveRequest(BaseModel):
+    """A retrieval request: the question and how much context to fetch.
 
     ``top_k`` overrides the default retrieval size for this call without
     rebuilding the vector store.
@@ -57,8 +57,68 @@ class QueryRequest(BaseModel):
     )
 
 
-class RetrieveRequest(QueryRequest):
-    """Same shape as :class:`QueryRequest`; used by the retrieve-only endpoint."""
+class LLMSettings(BaseModel):
+    """The model to answer with, and the caller's own key for it.
+
+    Sent as the optional ``llm`` object of a query. ``api_key`` is required:
+    without it a caller could run the server's own key against any model.
+    It is a ``SecretStr``, so printing, logging or dumping the request shows
+    ``**********``; only ``get_secret_value()`` returns the real key.
+    """
+
+    provider: str = Field(
+        ...,
+        description="Provider ID: 'gemini', 'groq', 'huggingface', or 'openai'",
+        examples=["gemini"],
+    )
+    model: str = Field(
+        ...,
+        description="Model ID, as listed for that provider in config/providers.py",
+        examples=["gemini-3.5-flash-lite"],
+    )
+    api_key: SecretStr = Field(
+        ...,
+        min_length=1,
+        description="Your API key for the provider. Used for this request only; never stored, logged or traced.",
+    )
+    temperature: float = Field(
+        0.0,
+        ge=0.0,
+        le=2.0,
+        description=(
+            "Sampling temperature. Not sent to models that reject or ignore "
+            "it (Gemini 3.5 Flash-Lite and 3.6 Flash, OpenAI o-series and "
+            "GPT-5.4); they use the provider's default."
+        ),
+        examples=[0.0],
+    )
+    max_tokens: int | None = Field(
+        None,
+        ge=1,
+        le=8192,
+        description=(
+            "Maximum output tokens, including any tokens the model spends "
+            "reasoning. Leave out to use the model's default from the "
+            "catalogue: 512, or 2048 for models that reason by default "
+            "(Groq GPT-OSS, OpenAI o-series and GPT-5.4, some Gemini models)."
+        ),
+        examples=[512],
+    )
+
+
+class QueryRequest(RetrieveRequest):
+    """A retrieval plus generation request.
+
+    Without ``llm`` the server's default model answers with the server's key.
+    """
+
+    llm: LLMSettings | None = Field(
+        None,
+        description=(
+            "Answer with this provider and model, using your own API key. "
+            "Leave out to use the server's default model."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -255,74 +315,3 @@ class QueryResponse(RetrieveResponse):
             }
         }
     )
-
-
-class CustomQueryRequest(BaseModel):
-    """A custom provider/model query request.
-
-    Allows specifying the LLM provider, model, and API key at request time.
-    """
-
-    query: str = Field(
-        ...,
-        min_length=1,
-        max_length=2000,
-        description="The user's question about the documents.",
-        examples=["Tell me about the pin configuration of the LM2596."],
-    )
-    top_k: int = Field(
-        RETRIEVAL_K,
-        ge=1,
-        le=30,
-        description=(
-            "How many chunks to retrieve. Every retrieved chunk's text and "
-            "tables are sent to the model, so this also sets the context size."
-        ),
-        examples=[RETRIEVAL_K],
-    )
-    provider: str = Field(
-        ...,
-        description="Provider ID: 'gemini', 'groq', 'huggingface', or 'openai'",
-        examples=["gemini"],
-    )
-    model: str = Field(
-        ...,
-        description="Model ID (must be valid for the selected provider)",
-        examples=["gemini-3.5-flash-lite"],
-    )
-    api_key: str = Field(
-        ...,
-        min_length=1,
-        description="API key for the selected provider",
-    )
-    temperature: float = Field(
-        0.0,
-        ge=0.0,
-        le=2.0,
-        description="Sampling temperature for generation.",
-        examples=[0.0],
-    )
-    max_tokens: int | None = Field(
-        None,
-        ge=1,
-        le=8192,
-        description=(
-            "Maximum output tokens, including any tokens the model spends "
-            "reasoning. Leave out to use the model's default from the "
-            "catalogue: 512, or 2048 for models that reason by default "
-            "(Groq GPT-OSS, OpenAI o-series and GPT-5.4, some Gemini models)."
-        ),
-        examples=[512],
-    )
-    max_images: int = Field(
-        GENERATION_MAX_IMAGES,
-        ge=0,
-        le=50,
-        description="Most images to send to the model, taken in chunk order (0 = all).",
-        examples=[GENERATION_MAX_IMAGES],
-    )
-
-
-class CustomQueryResponse(QueryResponse):
-    """Response for custom provider query - same as QueryResponse but with explicit usage."""
-    pass

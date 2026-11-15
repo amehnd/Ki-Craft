@@ -44,7 +44,7 @@ from src.logger import get_logger
 
 from api_client import health as api_health
 from api_client import stream as api_stream
-from api_client import query_custom
+from api_client import query as api_query
 
 logger = get_logger(__name__)
 
@@ -1556,7 +1556,7 @@ def render_chat_page() -> None:
             use_custom = st.session_state.get("use_custom_provider", False)
 
             if use_custom:
-                # Custom provider mode - use /v1/query/custom endpoint
+                # Custom provider mode: POST /v1/query with an llm object
                 provider = st.session_state.get("llm_provider")
                 model = st.session_state.get("llm_model")
                 custom_model = (st.session_state.get("llm_custom_model") or "").strip()
@@ -1575,15 +1575,17 @@ def render_chat_page() -> None:
                 answer_placeholder = st.empty()
 
                 with st.spinner("Retrieving chunks and generating answer..."):
-                    result = query_custom(
-                        query=query,
+                    result = api_query(
+                        query,
                         top_k=st.session_state.get("llm_top_k", 5),
-                        provider=provider,
-                        model=model,
-                        api_key=api_key,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
                         max_images=max_images,
+                        llm={
+                            "provider": provider,
+                            "model": model,
+                            "api_key": api_key,
+                            "temperature": temperature,
+                            "max_tokens": max_tokens,
+                        },
                     )
 
                 retrieval = result

@@ -8,29 +8,106 @@ from __future__ import annotations
 
 # Named examples for request bodies, in the shape FastAPI's
 # ``Body(openapi_examples=...)`` expects: each key is one entry in the
-# Examples dropdown on /docs, ``summary`` is its label, ``value`` the payload.
-QUERY_BODY_EXAMPLES = {
+# Examples dropdown on /docs, ``summary`` is its label, ``description`` the
+# note under it, and ``value`` the payload. Every example spells out every
+# setting, so a reader sees the whole body without opening the schema.
+_LM2596 = "Tell me about the pin configuration of the LM2596."
+
+RETRIEVE_BODY_EXAMPLES = {
     "lm2596_pins": {
         "summary": "LM2596 pin configuration",
-        "value": {"query": "Tell me about the pin configuration of the LM2596.", "top_k": 5},
+        "value": {"query": _LM2596, "top_k": 5},
     },
     "lm317_pins": {
-        "summary": "LM317, 10 chunks and every image",
-        "value": {"query": "Tell me about the pin configuration of the LM317.", "top_k": 10, "max_images": 0},
+        "summary": "LM317, 10 chunks",
+        "value": {"query": "Tell me about the pin configuration of the LM317.", "top_k": 10},
     },
 }
 
-CUSTOM_QUERY_BODY_EXAMPLES = {
+QUERY_BODY_EXAMPLES = {
+    "default_model": {
+        "summary": "Server's default model (no llm)",
+        "description": (
+            "Leave out ``llm`` and the server's default model (Gemini 3.5 "
+            "Flash-Lite) answers with the server's key. This is how /v1/query "
+            "behaved before the ``llm`` object existed."
+        ),
+        "value": {"query": _LM2596, "top_k": 5, "max_images": 3},
+    },
+    "default_model_every_image": {
+        "summary": "Server's default model, 10 chunks and every image",
+        "description": "``max_images`` 0 sends every retrieved figure, which costs far more tokens.",
+        "value": {"query": "Tell me about the pin configuration of the LM317.", "top_k": 10, "max_images": 0},
+    },
     "gemini": {
-        "summary": "Custom Gemini query",
+        "summary": "Gemini 3.5 Flash-Lite with your key",
+        "description": (
+            "This model uses fixed sampling, so ``temperature`` is not sent to it."
+        ),
         "value": {
-            "query": "Tell me about the pin configuration of the LM2596.",
+            "query": _LM2596,
             "top_k": 5,
-            "provider": "gemini",
-            "model": "gemini-3.5-flash-lite",
-            "api_key": "YOUR_GEMINI_API_KEY",
-            "temperature": 0.0,
-            "max_tokens": 512,
+            "max_images": 3,
+            "llm": {
+                "provider": "gemini",
+                "model": "gemini-3.5-flash-lite",
+                "api_key": "YOUR_GEMINI_API_KEY",
+                "temperature": 0.0,
+                "max_tokens": 512,
+            },
+        },
+    },
+    "groq_gpt_oss": {
+        "summary": "Groq GPT-OSS 120B",
+        "description": (
+            "A text-only model: it gets the chunks' text and tables, no figures, "
+            "whatever ``max_images`` says. It reasons before answering, and the "
+            "reasoning counts against ``max_tokens``, so its default is 2048; a "
+            "budget that runs out before any answer text returns 502."
+        ),
+        "value": {
+            "query": _LM2596,
+            "top_k": 5,
+            "max_images": 3,
+            "llm": {
+                "provider": "groq",
+                "model": "openai/gpt-oss-120b",
+                "api_key": "YOUR_GROQ_API_KEY",
+                "temperature": 0.0,
+                "max_tokens": 2048,
+            },
+        },
+    },
+    "openai_gpt_4o_mini": {
+        "summary": "OpenAI GPT-4o mini",
+        "description": "Reads images, so up to ``max_images`` figures are sent.",
+        "value": {
+            "query": _LM2596,
+            "top_k": 5,
+            "max_images": 3,
+            "llm": {
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "api_key": "YOUR_OPENAI_API_KEY",
+                "temperature": 0.0,
+                "max_tokens": 512,
+            },
+        },
+    },
+    "huggingface_llama": {
+        "summary": "Hugging Face router, Llama 3.3 70B",
+        "description": "A text-only model: no figures are sent. The key is a Hugging Face token.",
+        "value": {
+            "query": _LM2596,
+            "top_k": 5,
+            "max_images": 3,
+            "llm": {
+                "provider": "huggingface",
+                "model": "meta-llama/Llama-3.3-70B-Instruct",
+                "api_key": "YOUR_HF_TOKEN",
+                "temperature": 0.0,
+                "max_tokens": 512,
+            },
         },
     },
 }

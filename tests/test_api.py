@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 
 import langsmith
 import pytest
@@ -95,6 +96,7 @@ class FakeBackend:
         self.llm_error: str | None = None
         self.finish_reason: str | None = None
         self.prompts: list = []
+        self.client_kwargs: list[dict] = []
 
     def load_store(self, embedding_model) -> _FakeStore:
         """Replacement for ``load_vector_store``."""
@@ -103,7 +105,8 @@ class FakeBackend:
         return _FakeStore()
 
     def make_llm(self, *args, **kwargs) -> "_FakeLLM":
-        """Replacement for both chat client classes; ignores model and key."""
+        """Replacement for both chat client classes; records what it was given."""
+        self.client_kwargs.append(kwargs)
         return _FakeLLM(self)
 
 
@@ -356,67 +359,97 @@ def test_stream_with_broken_store_is_503(client, backend):
     assert response.status_code == 503
 
 
-def test_custom_query_uses_chosen_model(client):
+def _llm(**overrides) -> dict:
+    """An ``llm`` object for a request body, Groq GPT-OSS 20B unless overridden."""
+    return {"provider": "groq", "model": "openai/gpt-oss-20b", "api_key": "test-key", **overrides}
+
+
+def test_query_with_llm_uses_chosen_model_and_key(client, backend):
     response = client.post(
-        "/v1/query/custom",
-        json={
-            "query": "LM317 pins",
-            "top_k": 2,
-            "provider": "gemini",
-            "model": "gemini-3.5-flash-lite",
-            "api_key": "test-key",
-        },
+        "/v1/query",
+        json={"query": "LM317 pins", "top_k": 2,
+              "llm": _llm(provider="gemini", model="gemini-3.5-flash-lite")},
     )
     assert response.status_code == 200
     body = response.json()
     assert body["answer"] == "Hello world"
     assert body["usage"]["model"] == "gemini-3.5-flash-lite"
+    # The SecretStr is unwrapped once, so the client gets the plain key.
+    assert backend.client_kwargs[-1]["google_api_key"] == "test-key"
 
 
-def test_custom_query_text_only_model_gets_no_figures(client, backend):
+def test_query_with_text_only_model_gets_no_figures(client, backend):
     """A model the catalogue marks text-only is sent the text and tables only."""
-    response = client.post(
-        "/v1/query/custom",
-        json={
-            "query": "LM317 pins",
-            "top_k": 2,
-            "provider": "groq",
-            "model": "openai/gpt-oss-20b",
-            "api_key": "test-key",
-        },
-    )
+    response = client.post("/v1/query", json={"query": "LM317 pins", "top_k": 2, "llm": _llm()})
     assert response.status_code == 200
     assert response.json()["usage"]["prompt_images"] == 0
     assert [part["type"] for part in backend.prompts[0][0].content] == ["text"]
     assert response.json()["total_images"] == 1, "the response still lists the chunk's figure"
 
 
-def test_custom_query_without_max_tokens_is_accepted(client):
-    """max_tokens is optional; the catalogue default fills it in."""
+def test_query_with_llm_without_max_tokens_uses_catalogue_default(client, backend):
     response = client.post(
-        "/v1/query/custom",
-        json={"query": "LM317 pins", "top_k": 2, "provider": "groq",
-              "model": "openai/gpt-oss-20b", "api_key": "k", "max_tokens": None},
+        "/v1/query", json={"query": "LM317 pins", "top_k": 2, "llm": _llm(max_tokens=None)}
     )
     assert response.status_code == 200
+    assert backend.client_kwargs[-1]["max_tokens"] == 2048
 
 
-def test_custom_query_unknown_model_is_422(client, backend):
+def test_llm_without_api_key_is_422(client, backend):
+    """The server's own key is never used for a model the caller picks."""
+    llm = _llm()
+    del llm["api_key"]
+    response = client.post("/v1/query", json={"query": "x", "llm": llm})
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "llm", "api_key"]
+    assert backend.prompts == []
+
+
+def test_validation_error_does_not_echo_the_key(client):
+    """A missing ``llm.model`` would echo the whole ``llm`` object as ``input``."""
+    llm = _llm(api_key="sk-must-not-leak")
+    del llm["model"]
+    response = client.post("/v1/query", json={"query": "x", "llm": llm})
+    assert response.status_code == 422
+    error = response.json()["detail"][0]
+    assert error["loc"] == ["body", "llm", "model"]
+    assert set(error) == {"type", "loc", "msg"}
+    assert "sk-must-not-leak" not in response.text
+
+
+def test_query_unknown_model_is_422(client, backend):
     """An unknown model is the caller's mistake, rejected before retrieval."""
     response = client.post(
-        "/v1/query/custom",
-        json={"query": "x", "provider": "gemini", "model": "no-such-model", "api_key": "k"},
+        "/v1/query", json={"query": "x", "llm": _llm(provider="gemini", model="no-such-model")}
     )
     assert response.status_code == 422
     assert response.json() == {"detail": "Model no-such-model not found for provider gemini"}
     assert backend.prompts == []
 
 
-def test_custom_query_provider_failure_is_502(client, backend):
+def test_query_with_llm_provider_failure_is_502(client, backend):
     backend.llm_error = "invalid API key"
-    response = client.post(
-        "/v1/query/custom",
-        json={"query": "x", "provider": "groq", "model": "openai/gpt-oss-20b", "api_key": "k"},
-    )
+    response = client.post("/v1/query", json={"query": "x", "llm": _llm()})
     assert response.status_code == 502
     assert response.json() == {"detail": "The model provider failed: invalid API key"}
+
+
+@pytest.mark.parametrize("llm_error", [None, "invalid API key"])
+def test_api_key_never_reaches_the_logs(client, backend, caplog, llm_error):
+    backend.llm_error = llm_error
+    caplog.set_level(logging.DEBUG)
+    client.post("/v1/query", json={"query": "x", "llm": _llm(api_key="sk-must-not-leak")})
+    assert caplog.records, "the request should have logged something"
+    assert "sk-must-not-leak" not in caplog.text
+
+
+def test_custom_route_is_gone(client):
+    response = client.post("/v1/query/custom", json={"query": "x", **_llm()})
+    assert response.status_code == 404
+
+
+def test_retrieve_does_not_take_an_llm(client):
+    """Retrieval never calls a model, so its body has no ``llm`` field."""
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    assert "llm" not in schemas["RetrieveRequest"]["properties"]
+    assert "llm" in schemas["QueryRequest"]["properties"]

@@ -1,8 +1,8 @@
 """Chat model factory: builds the LangChain client for a catalogue model.
 
 Generation asks for a model by provider id and model id, both default
-(``src/retrieval/generate.py:default_llm``) and user-chosen (the
-``/v1/query/custom`` route in ``api/routers/query.py``).
+(``src/retrieval/generate.py:default_llm``) and user-chosen (the ``llm``
+object of ``POST /v1/query``, in ``api/routers/query.py``).
 This module looks both up in ``config/providers.py`` and returns a ready chat
 model. The provider's ``protocol``, not the shape of the model's name,
 decides which client class is used, and anything not in the catalogue is

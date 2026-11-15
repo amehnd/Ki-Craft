@@ -17,7 +17,7 @@ A chosen option is not frozen. When an agent works on that area it should still 
 
 Ingestion is offline. A PDF is partitioned into elements (text, tables, images) by `unstructured`. The elements are grouped into chunks by section title, and a vision LLM writes one searchable summary per chunk. Only the summary is embedded (IBM watsonx Granite, 768 dimensions) and stored in Chroma. The original text, the tables (as HTML), and the image paths ride along as metadata.
 
-At query time the question is embedded and Chroma returns 5 diverse chunks (MMR over 20 candidates). The original text, tables, and images are rebuilt from metadata and sent to Gemini as a multimodal prompt. FastAPI serves this as `/retrieve`, `/query`, `/query/stream` (SSE), and `/query/custom`, and Streamlit is the UI.
+At query time the question is embedded and Chroma returns 5 diverse chunks (MMR over 20 candidates). The original text, tables, and images are rebuilt from metadata and sent to Gemini as a multimodal prompt. FastAPI serves this as `/v1/retrieve`, `/v1/query` (an optional `llm` object picks the model), and `/v1/query/stream` (SSE), and Streamlit is the UI.
 
 The central design idea is **index the summary, answer from the original**. Summaries are good for matching questions. Originals are good for exact numbers.
 
@@ -213,7 +213,7 @@ For datasheets, hybrid search is the most valuable addition, because questions c
 
 ## 7. Generation
 
-**Today:** Gemini 3.5 Flash-Lite through `langchain-google-genai`. It uses fixed sampling, so no temperature is sent and answers can vary slightly between runs. The prompt contains chunk text, tables as HTML, and images as base64 `image_url` blocks (`src/retrieval/generate.py`). `/query/custom` lets the caller pick another provider and model with their own API key (`config/providers.py`). Both paths build their client with `create_llm` in `src/llm.py`.
+**Today:** Gemini 3.5 Flash-Lite through `langchain-google-genai`. It uses fixed sampling, so no temperature is sent and answers can vary slightly between runs. The prompt contains chunk text, tables as HTML, and images as base64 `image_url` blocks (`src/retrieval/generate.py`). An optional `llm` object on `/v1/query` lets the caller pick another provider and model with their own API key (`config/providers.py`). Both paths build their client with `create_llm` in `src/llm.py`.
 
 | Option | Strengths | Weaknesses |
 |---|---|---|
@@ -254,7 +254,7 @@ The default and custom-provider paths are one function that receives an LLM obje
 | `POST /query/stream` with the same body as `/query` | Long questions and options do not belong in a URL (logs, length limits); one schema for both | Browser `EventSource` supports only GET, so clients read the stream with `fetch` or `httpx` |
 | Real HTTP errors: 422 for bad input or an unknown model, 404 for unknown images, 502 when the LLM provider fails, 503 when the store is not ready | Clients and monitoring can tell failure from an answer; the UI can show the reason | The UI must handle error codes |
 
-The API key in the `llm` object travels in the request body over HTTPS. It must never be logged or stored, and it must never appear in traces.
+The API key in the `llm` object travels in the request body over HTTPS. It must never be logged or stored, and it must never appear in traces. Enforced 2026-11-16: the field is a Pydantic `SecretStr`, 422 bodies do not echo rejected values, and offline tests check that the key reaches neither the logs nor the trace runs of a real `ChatOpenAI` client.
 
 **Decided (2026-11-13): a `/v1` prefix** on every endpoint except `/` and `/health`. It lets the API change later (`/v2`) without breaking clients, at the cost of slightly longer URLs. Health stays unversioned because uptime probes and Railway's health check should not break when the API version changes.
 

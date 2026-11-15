@@ -33,7 +33,7 @@ supporting evidence: the exact document chunks, their tables, and their figures.
 
 There are only **three shapes** you need to understand:
 
-1. **Request** — always the same: `{"query": "...", "top_k": 5, "max_images": 3}` (both optional).
+1. **Request** — `{"query": "...", "top_k": 5, "max_images": 3}` (`top_k` and `max_images` optional), plus an optional `llm` object on `/v1/query` to pick the model.
 2. **`RetrieveResponse`** — the chunks + everything they contain.
 3. **`QueryResponse`** — the same, plus `answer` and `answer_characters`.
 
@@ -44,7 +44,7 @@ answer. Every error body has the same shape: `{"detail": "..."}`.
 
 | Status | Meaning | Example `detail` |
 |---|---|---|
-| `422` | The body is invalid (FastAPI's own check, `detail` is a list), or `/v1/query/custom` named a provider or model that is not in the catalogue | `"Model gpt-9 not found for provider openai"` |
+| `422` | The body is invalid (FastAPI's own check, `detail` is a list of `{type, loc, msg}`; the rejected value is never echoed, so an `llm.api_key` cannot come back in it), or `llm` named a provider or model that is not in the catalogue | `"Model gpt-9 not found for provider openai"` |
 | `500` | Unexpected server error; the real message is only in the server log | `"Internal server error"` |
 | `502` | The model provider failed (bad key, quota, timeout), or it returned no answer text | `"The model provider failed: ..."`, or `"The model used its whole output budget (512 tokens, reasoning included) before writing any answer text. Raise max_tokens and try again."` |
 | `503` | The vector store could not be loaded | `"Vector store unavailable: ..."` |
@@ -56,12 +56,14 @@ so an uptime probe can rely on the status code alone.
 
 ## 2. The request
 
-Both `/v1/retrieve` and `/v1/query` take the same JSON body:
+`/v1/retrieve` and `/v1/query` take the same JSON body, and `/v1/query` also
+takes an optional `llm` object:
 
 ```json
 {
   "query": "Tell me about the pin configuration of the LM317.",
-  "top_k": 5
+  "top_k": 5,
+  "max_images": 3
 }
 ```
 
@@ -73,6 +75,40 @@ Both `/v1/retrieve` and `/v1/query` take the same JSON body:
 
 Start with the defaults; raise `top_k` if answers miss context, and raise
 `max_images` (or set 0) for questions about graphs and diagrams.
+`/v1/retrieve` never calls a model, so it ignores `max_images`.
+
+### Choosing the model (`llm`, `/v1/query` only)
+
+Leave `llm` out and the server's default model (Gemini 3.5 Flash-Lite) answers
+with the server's own key. Send it to answer with another catalogued model and
+**your own** key:
+
+```json
+{
+  "query": "Tell me about the pin configuration of the LM2596.",
+  "top_k": 5,
+  "max_images": 3,
+  "llm": {
+    "provider": "groq",
+    "model": "openai/gpt-oss-120b",
+    "api_key": "YOUR_GROQ_API_KEY",
+    "temperature": 0.0,
+    "max_tokens": 2048
+  }
+}
+```
+
+| Field | Type | Rules | Meaning |
+|---|---|---|---|
+| `provider` | string | required | `gemini`, `groq`, `huggingface` or `openai` |
+| `model` | string | required | A model id listed for that provider in `config/providers.py`; anything else is a 422 |
+| `api_key` | string | required, non-empty | Your key for that provider. Used for this request only: never stored, logged, traced or echoed back. There is no fallback to a server key |
+| `temperature` | number | 0–2, default 0 | Not sent to models that reject or ignore it (Gemini 3.5 Flash-Lite and 3.6 Flash, OpenAI o-series and GPT-5.4) |
+| `max_tokens` | integer | 1–8192, optional | Output budget, reasoning included. Left out, the catalogue default applies: 2048 for models that reason by default, 512 otherwise |
+
+`/docs` has a ready body for Gemini, Groq GPT-OSS, OpenAI GPT-4o mini and the
+Hugging Face router. The streaming route takes `llm` too from commit 6e, when
+it becomes `POST /v1/query/stream`.
 
 ---
 

@@ -126,8 +126,8 @@ A raw datasheet chunk mixes prose, an HTML table, and figures, and an embedding 
 | Summaries | `zai-org/GLM-4.5V` through the Hugging Face router | hosted, ingestion only |
 | Embeddings | `ibm/granite-embedding-278m-multilingual` (768 dimensions) | IBM watsonx.ai |
 | Vector store | Chroma, cosine similarity, HNSW index | embedded, on disk in `dbv2/chroma_db` |
-| Retrieval | MMR: fetch the 20 nearest chunks, keep 10 that differ from each other | `src/retrieval/search.py` |
-| Generation | `gemini-3.5-flash-lite`; other providers through `/v1/query/custom` | Google Gemini API |
+| Retrieval | MMR by default: fetch the 20 nearest chunks, keep the 5 (`top_k`) that are relevant but differ from each other | `src/retrieval/search.py` |
+| Generation | `gemini-3.5-flash-lite`; other providers through the `llm` object of `/v1/query`, with the caller's key | Google Gemini API |
 | Tracing | LangSmith (optional) | hosted |
 
 The terms used here (MMR, HNSW, SSE, and so on) are explained in [docs/GLOSSARY.md](docs/GLOSSARY.md).
@@ -205,8 +205,7 @@ WATSONX_URL=https://eu-de.ml.cloud.ibm.com
 | `WATSONX_API_KEY` | Embedding every question, and every chunk at ingestion | An IBM Cloud API key |
 | `WATSONX_PROJECT_ID` | Same | The id of your watsonx.ai project |
 | `WATSONX_URL` | Same | Region endpoint; defaults to `https://eu-de.ml.cloud.ibm.com` |
-| `HF_TOKEN` | Ingestion only (chunk summaries); also the default key for Hugging Face models in `/v1/query/custom` | Create one at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
-| `GROQ_API_KEY`, `OPENAI_API_KEY` | Optional default keys for those providers in `/v1/query/custom` | A key can also be sent with the request |
+| `HF_TOKEN` | Ingestion only (chunk summaries) | Create one at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
 | `API_BASE_URL` | Dashboard | Where the dashboard finds the API; defaults to `http://localhost:8000` |
 | `CORS_ALLOWED_ORIGINS` | API | Comma-separated origins allowed to call the API from a browser |
 | `GENERATION_MAX_TOKENS` | API | Output token limit per answer; defaults to 512 |
@@ -232,9 +231,8 @@ Interactive documentation is at http://127.0.0.1:8001/docs.
 | GET | `/` | Lists the endpoints |
 | GET | `/health` | Reports whether the vector store loaded |
 | POST | `/v1/retrieve` | Returns the retrieved chunks, with no LLM call |
-| POST | `/v1/query` | Retrieves, then answers with the default model |
+| POST | `/v1/query` | Retrieves, then answers with the default model, or with the provider, model and key in an optional `llm` object |
 | GET | `/v1/query/stream` | The same, streamed token by token over Server-Sent Events |
-| POST | `/v1/query/custom` | The same retrieval, answered by a provider and model chosen in the request |
 | GET | `/v1/images/{response_id}/{index}` | Serves a figure returned by an earlier response |
 
 Retrieve chunks only:
@@ -247,6 +245,12 @@ Ask a question:
 
 ```bash
 curl -X POST http://127.0.0.1:8001/v1/query -H 'Content-Type: application/json' -d '{"query": "What is the dropout voltage of the TLV1117?"}'
+```
+
+Ask with another model and your own key (the API has no server-side key for other providers, so `api_key` is required whenever `llm` is sent):
+
+```bash
+curl -X POST http://127.0.0.1:8001/v1/query -H 'Content-Type: application/json' -d '{"query": "What is the dropout voltage of the TLV1117?", "top_k": 5, "max_images": 3, "llm": {"provider": "groq", "model": "openai/gpt-oss-120b", "api_key": "YOUR_GROQ_API_KEY", "max_tokens": 2048}}'
 ```
 
 Stream an answer:
@@ -397,14 +401,14 @@ Every tunable lives in `config/settings.py`.
 | `CHUNK_MAX_CHARACTERS` | `3000` | Largest chunk |
 | `ENHANCEMENT_MODEL` | `zai-org/GLM-4.5V` | Vision model that writes the chunk summaries |
 
-The providers and models offered by `/v1/query/custom` are listed in `config/providers.py`.
+The providers and models the `llm` object accepts are listed in `config/providers.py`.
 
 ## Project structure
 
 ```
 config/
   settings.py            every tunable and environment variable
-  providers.py           LLM providers and models for /v1/query/custom
+  providers.py           LLM providers and models the llm object accepts
 src/
   embed.py               the one embedding factory (watsonx Granite)
   documents.py           turns stored chunk metadata back into text, tables, figures

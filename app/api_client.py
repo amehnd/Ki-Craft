@@ -68,13 +68,29 @@ def retrieve(query: str, top_k: int = 5) -> dict:
     return _absolutize_image_urls(response.json())
 
 
-def query(query: str, top_k: int = 5) -> dict:
-    """Retrieve chunks and generate the full answer in one call."""
-    response = requests.post(
-        _url("/v1/query"),
-        json={"query": query, "top_k": top_k},
-        timeout=_REQUEST_TIMEOUT,
-    )
+def query(
+    query: str,
+    top_k: int = 5,
+    max_images: int = 3,
+    llm: dict | None = None,
+) -> dict:
+    """Retrieve chunks and generate the full answer in one call.
+
+    Args:
+        query: The question.
+        top_k: How many chunks to retrieve.
+        max_images: Most figures to send to the model (0 = all).
+        llm: Optional ``{"provider", "model", "api_key", "temperature",
+            "max_tokens"}`` to answer with that model and key; the server's
+            default model when omitted.
+
+    Raises:
+        requests.HTTPError: On any 4xx or 5xx, with the server's detail.
+    """
+    body: dict = {"query": query, "top_k": top_k, "max_images": max_images}
+    if llm is not None:
+        body["llm"] = llm
+    response = requests.post(_url("/v1/query"), json=body, timeout=_REQUEST_TIMEOUT)
     _raise_for_status(response)
     return _absolutize_image_urls(response.json())
 
@@ -103,32 +119,3 @@ def stream(query: str, top_k: int = 5) -> Iterator[tuple[str, dict]]:
                 if event == "retrieval":
                     data = _absolutize_image_urls(data)
                 yield event, data
-
-
-def query_custom(
-    query: str,
-    top_k: int,
-    provider: str,
-    model: str,
-    api_key: str,
-    temperature: float = 0.0,
-    max_tokens: int | None = None,
-    max_images: int = 3,
-) -> dict:
-    """Query with a custom provider/model/API key via ``/v1/query/custom``."""
-    response = requests.post(
-        _url("/v1/query/custom"),
-        json={
-            "query": query,
-            "top_k": top_k,
-            "provider": provider,
-            "model": model,
-            "api_key": api_key,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "max_images": max_images,
-        },
-        timeout=_REQUEST_TIMEOUT,
-    )
-    _raise_for_status(response)
-    return _absolutize_image_urls(response.json())

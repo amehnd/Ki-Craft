@@ -17,6 +17,8 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -58,6 +60,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """A body that fails validation: 422, without echoing the input.
+
+    FastAPI's own handler returns each Pydantic error with an ``input`` field
+    holding the value that failed. For a missing ``llm.model`` that value is
+    the whole ``llm`` object, API key included, so ``input`` is dropped and
+    ``type``, ``loc`` and ``msg`` (and ``ctx`` when present) are kept.
+    """
+    errors = [{k: v for k, v in error.items() if k != "input"} for error in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
 
 
 @app.exception_handler(LLMProviderError)

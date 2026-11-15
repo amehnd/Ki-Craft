@@ -8,17 +8,22 @@ records as input and output.
 from __future__ import annotations
 
 import contextvars
+import functools
 import json
+import logging
 
 import pytest
 from concurrent.futures import ThreadPoolExecutor
 
 from langchain_core.documents import Document
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+import httpx
 from langchain_core.messages import AIMessage
+from langchain_openai import ChatOpenAI
 from langsmith.run_helpers import tracing_context
 
-from src.llm import LLMProviderError
+import src.llm
+from src.llm import LLMProviderError, create_llm
 
 from src.retrieval import generate
 
@@ -136,3 +141,54 @@ def test_a_failed_generation_is_recorded_as_an_error():
     named = _by_name(client.runs)
     assert "The model provider failed" in named["GenerateAnswerStream"]["error"]
     assert "The model provider failed" in named["AnswerQuery"]["error"]
+
+
+SECRET_KEY = "sk-test-0123456789abcdef-must-not-leak"
+
+# One streamed OpenAI chat completion, as the provider sends it over SSE.
+_OPENAI_STREAM = (
+    'data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m",'
+    '"choices":[{"index":0,"delta":{"role":"assistant","content":"Pin 1 is GND."},"finish_reason":null}]}\n\n'
+    'data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m",'
+    '"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
+    "data: [DONE]\n\n"
+)
+
+
+@pytest.mark.parametrize("status", [200, 401])
+def test_api_key_never_reaches_the_trace_or_logs(monkeypatch, caplog, status):
+    """A real ChatOpenAI client holding the caller's key, over a fake network.
+
+    ``create_llm`` builds the same client a request with an ``llm`` object
+    gets; only its HTTP transport is replaced, so LangChain's own model run
+    and the OpenAI SDK's debug logs are the real ones. Both a successful
+    answer and a rejected key (401) are checked.
+    """
+    requests: list[httpx.Request] = []
+
+    def provider(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if status == 401:
+            return httpx.Response(401, json={"error": {"message": "Invalid API Key", "code": "invalid_api_key"}})
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=_OPENAI_STREAM)
+
+    transport = httpx.Client(transport=httpx.MockTransport(provider))
+    monkeypatch.setattr(src.llm, "ChatOpenAI", functools.partial(ChatOpenAI, http_client=transport))
+    caplog.set_level(logging.DEBUG)
+    client = _RecordingClient()
+    llm = create_llm("groq", "openai/gpt-oss-20b", SECRET_KEY)
+
+    with tracing_context(enabled=True, client=client, project_name="test"):
+        stream = generate.answer_query_stream(_FakeRetriever(), "LM555 pins?", llm, "openai/gpt-oss-20b")
+        if status == 200:
+            assert ("token", "Pin 1 is GND.") in list(stream)
+        else:
+            with pytest.raises(LLMProviderError):
+                list(stream)
+
+    assert requests[0].headers["authorization"] == f"Bearer {SECRET_KEY}", "the key was really used"
+    recorded = json.dumps(client.runs, default=str)
+    assert "ChatOpenAI" in recorded, "LangChain's own model run was recorded"
+    for text in (recorded, caplog.text):
+        assert SECRET_KEY not in text
+        assert SECRET_KEY[-12:] not in text, "not even a masked tail of the key"

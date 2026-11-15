@@ -86,7 +86,7 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **HTTP status code.** The three-digit number at the start of every HTTP response that says how it went, before anyone reads the body: 2xx succeeded, 4xx means the caller must change the request, 5xx means the server or something behind it failed. Clients, retries, proxies and uptime probes all act on it, which is why a failure must never be a 200. The codes this API uses are below; every error body is `{"detail": "..."}`.
 
-**422 Unprocessable Content.** The request was well-formed JSON but its content is wrong. FastAPI returns it when a body fails the Pydantic model (for example `top_k` 31); here `/v1/query/custom` also returns it for a provider or model not in the catalogue.
+**422 Unprocessable Content.** The request was well-formed JSON but its content is wrong. FastAPI returns it when a body fails the Pydantic model (for example `top_k` 31); here `/v1/query` also returns it when its `llm` object names a provider or model not in the catalogue. The body lists each failing field as `{type, loc, msg}`; the rejected value (`input`) is dropped, see [Request validation error](#request-validation-error).
 
 **500 Internal Server Error.** Something failed that the code did not expect. Here the caller gets only `"Internal server error"` and the traceback goes to the log, because error text can expose file paths and library internals.
 
@@ -95,6 +95,10 @@ Plain-language explanations of the technical terms used in this repository. Each
 **503 Service Unavailable.** The server cannot handle requests right now. Here: the vector store could not be loaded. Uptime probes such as Railway's health check treat it as "not healthy".
 
 **Exception handler.** A function registered with `@app.exception_handler(SomeError)` in `api/main.py`. When a route raises that error and nothing catches it, FastAPI calls the handler, which turns it into a response. Routes can then just raise, and the mapping from error to status code lives in one place.
+
+**SecretStr.** A Pydantic string type for secrets. Printing, logging or dumping a model that holds one shows `**********`; only `.get_secret_value()` returns the real text. `llm.api_key` in `api/schemas.py:LLMSettings` is one, and `api/routers/query.py:query` unwraps it once, to build the chat model.
+
+<a id="request-validation-error"></a>**Request validation error.** What FastAPI raises when a request body does not match its Pydantic model (a missing field, a number out of range). Its default handler answers 422 and, for each error, includes `input`, the value that failed. For a missing `llm.model` that value is the whole `llm` object, API key included, so `api/main.py:invalid_request` drops `input` and keeps `type`, `loc` (where in the body) and `msg`.
 
 **finish_reason.** Why the model stopped writing, reported with the last streamed chunk: `stop` (done), `length` (OpenAI-style providers) or `MAX_TOKENS` (Gemini) when it hit `max_tokens`, or a safety reason. A reply with no text and `length` means reasoning used up the whole budget. `src/retrieval/generate.py:_empty_answer_message`.
 
@@ -147,6 +151,8 @@ Plain-language explanations of the technical terms used in this repository. Each
 **Monkeypatch.** pytest's built-in fixture for temporarily replacing an attribute, such as a function inside a module, for one test. It puts the original back when the test ends. Here it swaps the Chroma loader and the LLM builders for fakes.
 
 **Fake (test double).** A small stand-in object that behaves like the real dependency for the few methods the code calls. `_FakeStore` has only `as_retriever`, and `_FakeLLM` has only `stream`.
+
+**Mock transport.** An `httpx` feature that answers HTTP requests from a Python function instead of the network. The OpenAI SDK sends its requests through `httpx`, so `tests/test_trace_structure.py` gives a real `ChatOpenAI` client a mock transport: the client, LangChain's tracing and the SDK's logs are all real, but nothing leaves the machine.
 
 **TestClient.** FastAPI's in-process HTTP client, built on `httpx`. It sends real requests to the app without starting a server or opening a port. Used inside `with`, it also runs the app's lifespan.
 
