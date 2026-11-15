@@ -50,7 +50,7 @@ Both `/retrieve` and `/query` take the same JSON body:
 |---|---|---|---|
 | `query` | string | 1–2000 chars | The question you want answered |
 | `top_k` | integer | 1–30, default 5 | How many document chunks to fetch. Every fetched chunk's text and tables go to the model, so more chunks = more evidence, but a longer prompt. |
-| `max_images` | integer | 0–50, default 3 | Most figures sent to the model, taken in chunk order. 0 sends every image. Images cost far more tokens than text. |
+| `max_images` | integer | 0–50, default 3 | Most figures sent to the model, taken in chunk order. 0 sends every image. Images cost far more tokens than text. A text-only model (`supports_vision` false in `config/providers.py`) is sent none, whatever this says. |
 
 Start with the defaults; raise `top_k` if answers miss context, and raise
 `max_images` (or set 0) for questions about graphs and diagrams.

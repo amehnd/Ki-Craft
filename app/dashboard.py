@@ -939,10 +939,11 @@ def render_sidebar() -> None:
             )
             st.number_input(
                 "Max Tokens",
-                min_value=1,
+                min_value=0,
                 max_value=8192,
-                value=512,
+                value=0,
                 key="llm_max_tokens",
+                help="0 uses the model's default (2048 for models that reason by default, otherwise 512).",
             )
             st.number_input(
                 "Max Images",
@@ -1563,7 +1564,7 @@ def render_chat_page() -> None:
                     model = custom_model
                 api_key = st.session_state.get("llm_api_key")
                 temperature = st.session_state.get("llm_temperature", 0.0)
-                max_tokens = st.session_state.get("llm_max_tokens", 512)
+                max_tokens = st.session_state.get("llm_max_tokens", 0) or None
                 max_images = st.session_state.get("llm_max_images", 3)
 
                 if not (provider and model and api_key):

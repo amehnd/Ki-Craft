@@ -30,6 +30,11 @@ class ModelInfo:
     # ignore it (Gemini fixed-sampling and GPT-5 models); src/llm.py then
     # leaves it out of the request.
     accepts_temperature: bool = True
+    # Output token budget when the caller does not set max_tokens. Reasoning
+    # models spend output tokens thinking before they answer, so 512 can be
+    # used up before any answer text (Groq GPT-OSS returned an empty answer
+    # at 512 on 2026-11-15). Models that reason by default get 2048.
+    default_max_tokens: int = 512
 
 
 @dataclass(frozen=True)
@@ -59,6 +64,7 @@ GEMINI_MODELS = (
     ),
     ModelInfo(
         id="gemini-3.6-flash",
+        default_max_tokens=2048,
         display_name="Gemini 3.6 Flash",
         context_window=1_000_000,
         input_price_per_1m=1.50,
@@ -88,6 +94,7 @@ GEMINI_MODELS = (
     ),
     ModelInfo(
         id="gemini-3.1-pro-preview",
+        default_max_tokens=2048,
         display_name="Gemini 3.1 Pro (Preview)",
         context_window=1_000_000,
         input_price_per_1m=2.00,
@@ -115,6 +122,7 @@ GEMINI_MODELS = (
     ),
     ModelInfo(
         id="gemini-2.5-pro",
+        default_max_tokens=2048,
         display_name="Gemini 2.5 Pro",
         context_window=1_000_000,
         input_price_per_1m=1.25,
@@ -124,6 +132,7 @@ GEMINI_MODELS = (
     ),
     ModelInfo(
         id="gemini-2.5-flash",
+        default_max_tokens=2048,
         display_name="Gemini 2.5 Flash",
         context_window=1_000_000,
         input_price_per_1m=0.30,
@@ -146,6 +155,7 @@ GEMINI_MODELS = (
 GROQ_MODELS = (
     ModelInfo(
         id="openai/gpt-oss-120b",
+        default_max_tokens=2048,
         display_name="OpenAI GPT OSS 120B",
         context_window=131_072,
         input_price_per_1m=0.15,
@@ -154,6 +164,7 @@ GROQ_MODELS = (
     ),
     ModelInfo(
         id="openai/gpt-oss-20b",
+        default_max_tokens=2048,
         display_name="OpenAI GPT OSS 20B",
         context_window=131_072,
         input_price_per_1m=0.075,
@@ -231,6 +242,7 @@ HF_MODELS = (
     ),
     ModelInfo(
         id="openai/gpt-oss-120b",
+        default_max_tokens=2048,
         display_name="GPT-OSS 120B (HF Router)",
         context_window=131_072,
         input_price_per_1m=0.15,
@@ -261,6 +273,7 @@ OPENAI_MODELS = (
     ),
     ModelInfo(
         id="o1",
+        default_max_tokens=2048,
         display_name="o1 (Reasoning)",
         context_window=200_000,
         input_price_per_1m=15.00,
@@ -270,6 +283,7 @@ OPENAI_MODELS = (
     ),
     ModelInfo(
         id="o1-mini",
+        default_max_tokens=2048,
         display_name="o1-mini (Reasoning)",
         context_window=128_000,
         input_price_per_1m=3.00,
@@ -279,6 +293,7 @@ OPENAI_MODELS = (
     ),
     ModelInfo(
         id="o3-mini",
+        default_max_tokens=2048,
         display_name="o3-mini (Reasoning)",
         context_window=200_000,
         input_price_per_1m=1.10,
@@ -306,6 +321,7 @@ OPENAI_MODELS = (
     ),
     ModelInfo(
         id="gpt-5.4",
+        default_max_tokens=2048,
         display_name="GPT-5.4 (Latest Flagship)",
         context_window=1_000_000,
         input_price_per_1m=2.50,
@@ -316,6 +332,7 @@ OPENAI_MODELS = (
     ),
     ModelInfo(
         id="gpt-5.4-mini",
+        default_max_tokens=2048,
         display_name="GPT-5.4 Mini",
         context_window=400_000,
         input_price_per_1m=0.75,
@@ -326,6 +343,7 @@ OPENAI_MODELS = (
     ),
     ModelInfo(
         id="gpt-5.4-nano",
+        default_max_tokens=2048,
         display_name="GPT-5.4 Nano",
         context_window=128_000,
         input_price_per_1m=0.20,

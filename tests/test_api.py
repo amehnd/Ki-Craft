@@ -302,6 +302,34 @@ def test_custom_query_uses_chosen_model(client):
     assert body["usage"]["model"] == "gemini-3.5-flash-lite"
 
 
+def test_custom_query_text_only_model_gets_no_figures(client, backend):
+    """A model the catalogue marks text-only is sent the text and tables only."""
+    response = client.post(
+        "/query/custom",
+        json={
+            "query": "LM317 pins",
+            "top_k": 2,
+            "provider": "groq",
+            "model": "openai/gpt-oss-20b",
+            "api_key": "test-key",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["usage"]["prompt_images"] == 0
+    assert [part["type"] for part in backend.prompts[0][0].content] == ["text"]
+    assert response.json()["total_images"] == 1, "the response still lists the chunk's figure"
+
+
+def test_custom_query_without_max_tokens_is_accepted(client):
+    """max_tokens is optional; the catalogue default fills it in."""
+    response = client.post(
+        "/query/custom",
+        json={"query": "LM317 pins", "top_k": 2, "provider": "groq",
+              "model": "openai/gpt-oss-20b", "api_key": "k", "max_tokens": None},
+    )
+    assert response.status_code == 200
+
+
 def test_custom_query_unknown_model_is_500(client):
     """An unknown model is reported as a server error.
 

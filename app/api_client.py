@@ -91,7 +91,7 @@ def query_custom(
     model: str,
     api_key: str,
     temperature: float = 0.0,
-    max_tokens: int = 512,
+    max_tokens: int | None = None,
     max_images: int = 3,
 ) -> dict:
     """Query with a custom provider/model/API key via ``/query/custom``."""

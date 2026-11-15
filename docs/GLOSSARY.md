@@ -32,6 +32,8 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **Multi-vector embeddings.** Storing more than one vector per chunk (for example one for the raw text and one for the summary) and matching a question against any of them. Better recall, more storage.
 
+**Vision (multimodal) model.** A model that accepts images in the prompt as well as text. `supports_vision` in `config/providers.py` records it per model; a text-only model is sent no figures (`src/llm.py:accepts_images`).
+
 **Temperature.** How random a model's word choice is. At 0 it always picks the most likely next token, so answers repeat; higher values vary more. Some models fix it: Gemini 3.5 Flash-Lite, the default here, ignores it, which is why `accepts_temperature` exists in `config/providers.py`.
 
 **OpenAI-compatible API.** A provider that accepts the same HTTP requests as OpenAI's chat API at its own address. Groq and the Hugging Face router are, so one client (`ChatOpenAI` with a different `base_url`) serves all three. The provider's `protocol` field records this.

@@ -12,6 +12,7 @@ pytest.importorskip("langchain_core")
 from langchain_core.documents import Document
 
 from src.retrieval.generate import (
+    _build_message_content,
     _build_text_prompt,
     _collect_images,
     _capture_usage,
@@ -97,9 +98,10 @@ def test_trace_inputs_keep_the_question_and_drop_objects():
             "model_id": "gemini-3.5-flash-lite",
             "chunks": ["a", "b"],
             "max_images": 0,
+            "send_images": True,
         }
     )
-    assert recorded == {"question": "LM555 pins?", "max_images": 0, "num_chunks": 2}
+    assert recorded == {"question": "LM555 pins?", "max_images": 0, "send_images": True, "num_chunks": 2}
 
 
 def _chunk(summary: str, images: list[str]) -> Document:
@@ -130,3 +132,17 @@ def test_image_cap_takes_images_in_chunk_order():
 def test_image_cap_zero_sends_every_image():
     chunks = [_chunk("a", ["A1", "A2"]), _chunk("b", ["B1"])]
     assert len(_collect_images(chunks, 0)) == 3
+
+
+def test_text_only_model_gets_no_images_and_no_mention_of_them():
+    chunks = [_chunk("a", ["A1", "A2"]), _chunk("b", ["B1"])]
+    content = _build_message_content(chunks, "q", max_images=0, send_images=False)
+    assert [part["type"] for part in content] == ["text"]
+    assert "image" not in content[0]["text"].lower()
+
+
+def test_vision_model_gets_images_and_is_told_about_them():
+    chunks = [_chunk("a", ["A1"])]
+    content = _build_message_content(chunks, "q", max_images=0, send_images=True)
+    assert [part["type"] for part in content] == ["text", "image_url"]
+    assert "attached images" in content[0]["text"]

@@ -18,9 +18,15 @@ from collections.abc import Iterator
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from config.settings import GENERATION_MAX_IMAGES, GENERATION_MODEL, RETRIEVAL_K
+from config.settings import (
+    GENERATION_MAX_IMAGES,
+    GENERATION_MODEL,
+    GENERATION_PROVIDER,
+    RETRIEVAL_K,
+)
 from src.documents import extract_original_data
 from src.embed import load_embedding_model
+from src.llm import accepts_images
 from src.logger import get_logger
 from src.retrieval.generate import StreamEvent, answer_query_stream, default_llm
 from src.retrieval.search import build_retriever, load_vector_store, retrieve_chunks
@@ -83,6 +89,7 @@ class RAGService:
         top_k: int,
         max_images: int = GENERATION_MAX_IMAGES,
         llm: BaseChatModel | None = None,
+        provider_id: str | None = None,
         model_id: str | None = None,
     ) -> Iterator[StreamEvent]:
         """Retrieve chunks and return the answer as a stream of events.
@@ -96,8 +103,11 @@ class RAGService:
             max_images: Most images to send to the model (0 = all).
             llm: A chat model from ``src/llm.py:create_llm``; the default
                 Gemini model when omitted.
+            provider_id: The catalogue provider of ``llm``. Ignored when
+                ``llm`` is omitted.
             model_id: The catalogue id of ``llm``, recorded in usage. Ignored
-                when ``llm`` is omitted.
+                when ``llm`` is omitted. With ``provider_id`` it decides
+                whether figures are sent: a text-only model gets none.
 
         Returns:
             The generator from ``answer_query_stream``: ``("chunks", ...)``,
@@ -105,13 +115,14 @@ class RAGService:
             Nothing runs until it is iterated.
         """
         if llm is None:
-            llm, model_id = default_llm(), GENERATION_MODEL
+            llm, provider_id, model_id = default_llm(), GENERATION_PROVIDER, GENERATION_MODEL
         return answer_query_stream(
             self.get_retriever(top_k),
             query,
             llm,
             model_id,
             max_images=max_images,
+            send_images=accepts_images(provider_id, model_id),
         )
 
     async def answer(
@@ -120,6 +131,7 @@ class RAGService:
         top_k: int,
         max_images: int = GENERATION_MAX_IMAGES,
         llm: BaseChatModel | None = None,
+        provider_id: str | None = None,
         model_id: str | None = None,
     ) -> tuple[str, RetrieveResponse, dict]:
         """Retrieve chunks and generate a full answer.
@@ -137,7 +149,7 @@ class RAGService:
             chunks: list = []
             tokens: list[str] = []
             usage: dict = {}
-            for kind, value in self.stream_answer(query, top_k, max_images, llm, model_id):
+            for kind, value in self.stream_answer(query, top_k, max_images, llm, provider_id, model_id):
                 if kind == "chunks":
                     chunks = value
                 elif kind == "token":

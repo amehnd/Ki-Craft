@@ -302,11 +302,16 @@ class CustomQueryRequest(BaseModel):
         description="Sampling temperature for generation.",
         examples=[0.0],
     )
-    max_tokens: int = Field(
-        512,
+    max_tokens: int | None = Field(
+        None,
         ge=1,
         le=8192,
-        description="Maximum output tokens to generate.",
+        description=(
+            "Maximum output tokens, including any tokens the model spends "
+            "reasoning. Leave out to use the model's default from the "
+            "catalogue: 512, or 2048 for models that reason by default "
+            "(Groq GPT-OSS, OpenAI o-series and GPT-5.4, some Gemini models)."
+        ),
         examples=[512],
     )
     max_images: int = Field(

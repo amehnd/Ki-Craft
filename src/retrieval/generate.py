@@ -92,24 +92,30 @@ def _extract_text(content: Any) -> str:
     return str(content)
 
 
-def _build_text_prompt(chunks: list[Document], query: str) -> str:
+def _build_text_prompt(chunks: list[Document], query: str, with_images: bool = True) -> str:
     """Build the text portion of the prompt from retrieved chunks.
 
     Sends enhanced summaries as primary context, with HTML tables appended,
     for every chunk given; the prompt size is set by how many chunks were
     retrieved (``top_k``). Images are sent separately via
-    :func:`_collect_images`.
+    :func:`_collect_images`. When ``with_images`` is false (a text-only
+    model), the instructions do not mention figures.
     """
+    if with_images:
+        contents = "- optional HTML tables,\n- optional attached figures/images.\n\n"
+        use = "Use both the text summaries and the attached images when answering.\n"
+    else:
+        contents = "- optional HTML tables.\n\n"
+        use = "Use the text summaries and tables when answering.\n"
     parts = [
         "You are given retrieved chunks from a technical document.\n"
         "Each chunk contains:\n"
         "- a searchable summary of the original content,\n"
-        "- optional HTML tables,\n"
-        "- optional attached figures/images.\n\n"
-        "Treat the summaries as authoritative representations of the document.\n"
+        + contents
+        + "Treat the summaries as authoritative representations of the document.\n"
         "Do NOT claim information is absent unless you have examined ALL provided chunks.\n"
         "If a chunk explicitly contains the answer, answer directly using that chunk.\n"
-        "Use both the text summaries and the attached images when answering.\n",
+        + use,
         f"QUESTION: {query}\n",
         "RETRIEVED CONTEXT:",
         "",
@@ -129,10 +135,13 @@ def _build_text_prompt(chunks: list[Document], query: str) -> str:
 
         parts.append("")
 
-    parts.append(
-        "The images above are figures from the document. "
-        "Use the summaries, tables, and images together to provide a detailed answer."
-    )
+    if with_images:
+        parts.append(
+            "The attached images are figures from the document. "
+            "Use the summaries, tables, and images together to provide a detailed answer."
+        )
+    else:
+        parts.append("Use the summaries and tables together to provide a detailed answer.")
 
     return "\n".join(parts)
 
@@ -157,13 +166,17 @@ def _collect_images(chunks: list[Document], max_images: int) -> list[dict]:
     return image_blocks
 
 
-def _build_message_content(chunks: list[Document], query: str, max_images: int) -> list[dict]:
+def _build_message_content(
+    chunks: list[Document], query: str, max_images: int, send_images: bool = True
+) -> list[dict]:
     """Build the full multimodal message content list (text + images).
 
     ``max_images`` caps how many images are sent to the model (0 = all).
+    ``send_images`` is false for a text-only model: no image blocks at all.
     """
-    content: list[dict] = [{"type": "text", "text": _build_text_prompt(chunks, query)}]
-    content.extend(_collect_images(chunks, max_images))
+    content: list[dict] = [{"type": "text", "text": _build_text_prompt(chunks, query, send_images)}]
+    if send_images:
+        content.extend(_collect_images(chunks, max_images))
     return content
 
 
@@ -221,6 +234,7 @@ def _trace_inputs(inputs: dict) -> dict:
     recorded = {
         "question": inputs.get("query"),
         "max_images": inputs.get("max_images"),
+        "send_images": inputs.get("send_images"),
     }
     if "chunks" in inputs:
         recorded["num_chunks"] = len(inputs["chunks"])
@@ -257,6 +271,7 @@ def answer_query_stream(
     model_id: str,
     *,
     max_images: int = GENERATION_MAX_IMAGES,
+    send_images: bool = True,
     run_tree=None,
 ) -> Iterator[StreamEvent]:
     """Retrieve chunks then stream an answer under a single LangSmith trace.
@@ -273,6 +288,7 @@ def answer_query_stream(
         llm: The chat model to answer with (see ``src/llm.py``).
         model_id: The model's catalogue id, recorded in ``usage``.
         max_images: Most images to send to the model (0 = all).
+        send_images: False for a text-only model; no figures are sent.
 
     Yields:
         ``("chunks", list[Document])`` once, as soon as retrieval finishes;
@@ -293,6 +309,7 @@ def answer_query_stream(
         model_id,
         usage=usage,
         max_images=max_images,
+        send_images=send_images,
     ):
         yield "token", token
     yield "usage", usage
@@ -312,6 +329,7 @@ def generate_answer_stream(
     *,
     usage: dict[str, Any] | None = None,
     max_images: int = GENERATION_MAX_IMAGES,
+    send_images: bool = True,
 ) -> Iterator[str]:
     """Stream an answer from ``llm`` for already retrieved chunks.
 
@@ -328,6 +346,7 @@ def generate_answer_stream(
             latency and prompt size as the stream runs; a fresh one is used
             when omitted.
         max_images: Most images to send to the model (0 = all).
+        send_images: False for a text-only model; no figures are sent.
 
     Yields:
         Answer token strings.
@@ -351,7 +370,7 @@ def generate_answer_stream(
                 len(od["images_base64"]),
             )
 
-        message_content = _build_message_content(chunks, query, max_images)
+        message_content = _build_message_content(chunks, query, max_images, send_images)
 
         prompt_chars, prompt_images = _prompt_stats(message_content)
         usage.update(

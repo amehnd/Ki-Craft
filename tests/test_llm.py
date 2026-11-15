@@ -92,3 +92,38 @@ def test_unknown_model_is_rejected(built):
     with pytest.raises(ValueError, match="Model gpt-9 not found for provider openai"):
         llm.create_llm("openai", "gpt-9", "key")
     assert built == {}
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "expected"),
+    [
+        ("gemini", "gemini-3.5-flash-lite", True),
+        ("openai", "gpt-4o-mini", True),
+        ("groq", "openai/gpt-oss-20b", False),
+        ("huggingface", "deepseek-ai/DeepSeek-V3", False),
+        ("gemini", "no-such-model", False),
+    ],
+)
+def test_accepts_images_follows_the_catalogue(provider, model, expected):
+    assert llm.accepts_images(provider, model) is expected
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "budget"),
+    [
+        ("groq", "openai/gpt-oss-20b", 2048),
+        ("openai", "o3-mini", 2048),
+        ("gemini", "gemini-3.5-flash-lite", 512),
+        ("openai", "gpt-4o-mini", 512),
+    ],
+)
+def test_unset_max_tokens_uses_the_model_default(built, provider, model, budget):
+    """Reasoning models need room to think before answering."""
+    llm.create_llm(provider, model, "key")
+    sent = built["kwargs"].get("max_tokens", built["kwargs"].get("max_output_tokens"))
+    assert sent == budget
+
+
+def test_explicit_max_tokens_wins_over_the_model_default(built):
+    llm.create_llm("groq", "openai/gpt-oss-20b", "key", max_tokens=300)
+    assert built["kwargs"]["max_tokens"] == 300

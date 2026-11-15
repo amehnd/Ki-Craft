@@ -21,13 +21,28 @@ from src.logger import get_logger
 logger = get_logger(__name__)
 
 
+def accepts_images(provider_id: str, model_id: str) -> bool:
+    """Say whether a catalogue model can read images in the prompt.
+
+    Args:
+        provider_id: A provider id from ``config/providers.py``.
+        model_id: A model id listed under that provider.
+
+    Returns:
+        The model's ``supports_vision`` flag; False for a model not in the
+        catalogue.
+    """
+    model = get_model(provider_id, model_id)
+    return bool(model and model.supports_vision)
+
+
 def create_llm(
     provider_id: str,
     model_id: str,
     api_key: str,
     *,
     temperature: float = 0.0,
-    max_tokens: int = 512,
+    max_tokens: int | None = None,
 ) -> BaseChatModel:
     """Build the chat model for one provider and model from the catalogue.
 
@@ -38,7 +53,8 @@ def create_llm(
         api_key: The key to authenticate with. Never logged.
         temperature: Sampling temperature. Sent only when the model's
             catalogue entry accepts it; otherwise the provider default applies.
-        max_tokens: Maximum output tokens.
+        max_tokens: Maximum output tokens, reasoning included. None uses the
+            model's ``default_max_tokens`` from the catalogue.
 
     Returns:
         A LangChain chat model ready for ``invoke`` or ``stream``.
@@ -56,6 +72,8 @@ def create_llm(
     # Some models reject a temperature (OpenAI o-series) or ignore it with a
     # warning (Gemini fixed-sampling models), so it is sent only when accepted.
     sampling = {"temperature": temperature} if model.accepts_temperature else {}
+    if max_tokens is None:
+        max_tokens = model.default_max_tokens
     logger.info("Creating chat model %s/%s (max_tokens=%d)", provider_id, model_id, max_tokens)
 
     if provider.protocol == "gemini":

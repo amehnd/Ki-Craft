@@ -182,6 +182,7 @@ async def query_custom(
             req.top_k,
             req.max_images,
             llm=llm,
+            provider_id=req.provider,
             model_id=req.model,
         )
     except Exception as exc:
