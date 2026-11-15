@@ -136,8 +136,8 @@ Ask a question about the indexed PDFs. The service:
 
 ### Response
 
-Every response includes a `response_id`; chunk figures can be loaded over
-HTTP via `GET /v1/images/{response_id}/{index}`.
+Every chunk carries its `record_id`, and each of its figures can be loaded
+over HTTP at a stable URL, `GET /v1/images/{record_id}/{position}`.
 """
 
 

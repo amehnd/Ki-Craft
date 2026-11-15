@@ -9,7 +9,10 @@ The pipeline stores the original multimodal content of every chunk inside its
   while images are referenced by file path in ``metadata["image_paths"]``.
 
 This module normalises both schemas into a single dict so callers never need to
-know which one a document uses.
+know which one a document uses. Figure URLs (``/v1/images/{record_id}/{position}``)
+are served from files only, so :func:`image_file` reads the flattened schema;
+the nested one is what ``scripts/ingest.py`` still writes, and its figures have
+no URL.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from typing import Any
 
 from langchain_core.documents import Document
 
+from config.settings import IMAGES_DIR
 from src.logger import get_logger
 
 logger = get_logger(__name__)
@@ -79,6 +83,42 @@ def extract_original_data(chunk: Document) -> dict:
         "tables_html": tables_html,
         "images_base64": images_base64,
     }
+
+
+def stored_image_paths(metadata: dict) -> list[str]:
+    """Return a record's figure paths, in stored order; empty when it has none.
+
+    Only the flattened schema has paths; figures stored inline as base64 have
+    none, so they get no URL.
+    """
+    paths = _parse_json_value(metadata.get("image_paths"), [])
+    return [str(path) for path in paths] if isinstance(paths, list) else []
+
+
+def image_file(metadata: dict, position: int) -> Path | None:
+    """Find the file of one figure of a stored record.
+
+    The path comes from the record's own metadata, never from the caller, and
+    must resolve to a file inside ``IMAGES_DIR``; anything else (a stored path
+    with ``..`` or an absolute path elsewhere) is treated as missing.
+
+    Args:
+        metadata: The record's metadata, as Chroma stores it.
+        position: 0-based index into the record's ``image_paths``.
+
+    Returns:
+        The absolute path of the figure, or None when the position is out of
+        range, the path points outside ``IMAGES_DIR``, or the file is missing.
+    """
+    paths = stored_image_paths(metadata)
+    if not 0 <= position < len(paths):
+        return None
+    images_root = (_PROJECT_ROOT / IMAGES_DIR).resolve()
+    full_path = (_PROJECT_ROOT / paths[position]).resolve()
+    if not full_path.is_relative_to(images_root) or not full_path.is_file():
+        logger.warning("Stored figure path is outside %s or missing: %s", IMAGES_DIR, paths[position])
+        return None
+    return full_path
 
 
 def _read_image_as_base64(image_path: str) -> str:

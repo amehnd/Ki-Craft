@@ -14,7 +14,9 @@ Every query, with the default model or a caller-chosen one, goes through
 from __future__ import annotations
 
 import asyncio
+import uuid
 from collections.abc import Iterator
+from pathlib import Path
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -24,14 +26,13 @@ from config.settings import (
     GENERATION_PROVIDER,
     RETRIEVAL_K,
 )
-from src.documents import extract_original_data
+from src.documents import extract_original_data, image_file, stored_image_paths
 from src.embed import load_embedding_model
 from src.llm import accepts_images
 from src.logger import get_logger
 from src.retrieval.generate import StreamEvent, answer_query_stream, default_llm
 from src.retrieval.search import build_retriever, load_vector_store, retrieve_chunks
 
-from api.images import ImageRegistry
 from api.schemas import ChunkPayload, RetrieveResponse
 
 logger = get_logger(__name__)
@@ -56,7 +57,6 @@ class RAGService:
         self._db = None
         self._retriever = None
         self._load_lock = asyncio.Lock()
-        self.images = ImageRegistry()
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -177,23 +177,41 @@ class RAGService:
         answer, chunks, usage = await asyncio.to_thread(_run)
         return answer, self.to_retrieve_response(query, chunks), usage
 
+    async def image(self, record_id: str, position: int) -> Path | None:
+        """Find one figure of a stored record, for ``/v1/images/{record_id}/{position}``.
+
+        The file path is read from the record's metadata in the store, never
+        taken from the caller.
+
+        Args:
+            record_id: The Chroma record id (a UUID string).
+            position: 0-based index into the record's figures.
+
+        Returns:
+            The figure's file, or None when the record, the position or the
+            file does not exist.
+
+        Raises:
+            StoreUnavailableError: If the store cannot be loaded.
+        """
+        await self.ensure_ready()
+        found = await asyncio.to_thread(self._db.get, ids=[record_id], include=["metadatas"])
+        metadatas = found.get("metadatas") or []
+        if not metadatas:
+            return None
+        return image_file(metadatas[0] or {}, position)
+
     # -- payload assembly ---------------------------------------------------
 
     def to_retrieve_response(self, query: str, chunks: list) -> RetrieveResponse:
         """Build the API response for a set of retrieved chunks.
 
-        Registers all chunk images in the :class:`ImageRegistry` and produces
-        the ``image_urls`` that reference them.
+        Each figure stored as a file gets a stable URL,
+        ``/v1/images/{record_id}/{position}``, where ``record_id`` is the
+        chunk's Chroma record id and ``position`` counts from 0 within the
+        chunk. ``response_id`` no longer keys anything; it goes in 6d-2.
         """
-        images_by_chunk = [extract_original_data(c)["images_base64"] for c in chunks]
-
-        starts: list[int] = []
-        offset = 0
-        for images in images_by_chunk:
-            starts.append(offset)
-            offset += len(images)
-
-        response_id = self.images.register(images_by_chunk)
+        response_id = uuid.uuid4().hex
 
         payloads: list[ChunkPayload] = []
         total_images = 0
@@ -215,9 +233,13 @@ class RAGService:
                     tables_html=tables,
                     image_count=len(images),
                     images_base64=images,
+                    record_id=chunk.id,
                     image_urls=[
-                        f"/v1/images/{response_id}/{starts[i] + j}" for j in range(len(images))
-                    ],
+                        f"/v1/images/{chunk.id}/{position}"
+                        for position in range(len(stored_image_paths(chunk.metadata or {})))
+                    ]
+                    if chunk.id
+                    else [],
                     has_table=bool(tables),
                     has_image=bool(images),
                     source=metadata.get("source"),

@@ -233,7 +233,7 @@ Interactive documentation is at http://127.0.0.1:8001/docs.
 | POST | `/v1/retrieve` | Returns the retrieved chunks, with no LLM call |
 | POST | `/v1/query` | Retrieves, then answers with the default model, or with the provider, model and key in an optional `llm` object |
 | GET | `/v1/query/stream` | The same, streamed token by token over Server-Sent Events |
-| GET | `/v1/images/{response_id}/{index}` | Serves a figure returned by an earlier response |
+| GET | `/v1/images/{record_id}/{position}` | Serves one figure of a stored chunk, at a stable URL |
 
 Retrieve chunks only:
 

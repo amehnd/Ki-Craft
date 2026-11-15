@@ -240,7 +240,7 @@ The default and custom-provider paths are one function that receives an LLM obje
 - One FastAPI app in `api/main.py` with seven endpoints.
 - `RAGService` loads the store once and is shared through `app.state`.
 - Synchronous LangChain calls run in `asyncio.to_thread`.
-- Figures are served from an in-memory `ImageRegistry` under `/images/{response_id}/{index}`, and responses also carry every figure as base64.
+- Figures are served from disk at stable URLs, `/v1/images/{record_id}/{position}` (since 2026-11-16; before that an in-memory `ImageRegistry` kept them for 30 minutes under a per-response id). Responses still carry every figure as base64 until 6d-2.
 - Errors are real HTTP statuses (since 2026-11-15): 502 for a failing or silent model provider, 503 when the store cannot load, 422 for an unknown model, and a generic 500 otherwise. Before that a provider failure was a 200 with a "Sorry..." answer.
 
 **Decided (2026-11-12):**

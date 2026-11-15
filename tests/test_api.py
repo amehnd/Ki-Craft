@@ -29,6 +29,7 @@ from langchain_core.documents import Document
 from langchain_core.messages import AIMessageChunk
 
 import api.service
+import src.documents
 import src.embed
 import src.llm
 import src.retrieval.search
@@ -37,10 +38,20 @@ from api.main import app
 # Starts with the JPEG magic bytes so it looks like a real figure.
 JPEG_BYTES = b"\xff\xd8\xff\xe0fake-jpeg-for-tests"
 
+LM317_ID = "11111111-1111-4111-8111-111111111111"
+TLV1117_ID = "22222222-2222-4222-8222-222222222222"
+# A record whose stored path climbs out of the images folder.
+ESCAPING_ID = "33333333-3333-4333-8333-333333333333"
+
 
 def _fake_chunks() -> list[Document]:
-    """Two chunks, one per metadata schema that ``src/documents.py`` reads."""
+    """Two chunks, one per metadata schema that ``src/documents.py`` reads.
+
+    The nested chunk keeps its figure inline as base64, so it gets no URL;
+    the flattened one points at a file under the test's ``dbv2/images``.
+    """
     nested = Document(
+        id=LM317_ID,
         page_content="LM317 summary: adjustable regulator with ADJ, VOUT, VIN pins.",
         metadata={
             "source": "lm317",
@@ -54,12 +65,13 @@ def _fake_chunks() -> list[Document]:
         },
     )
     flat = Document(
+        id=TLV1117_ID,
         page_content="TLV1117 summary: fixed 3.3 V LDO.",
         metadata={
             "source": "tlv1117",
             "raw_text": "Dropout 1.1 V at 800 mA.",
             "tables_html": "[]",
-            "image_paths": "[]",
+            "image_paths": json.dumps(["dbv2/images/tlv1117_c1_img0.jpg"]),
         },
     )
     return [nested, flat]
@@ -77,11 +89,18 @@ class _FakeRetriever:
 
 
 class _FakeStore:
-    """Stands in for the Chroma store: only ``as_retriever`` is used."""
+    """Stands in for the Chroma store: ``as_retriever`` and ``get`` are used."""
 
     def as_retriever(self, search_type: str = "mmr", search_kwargs: dict | None = None):
         """Mimic ``Chroma.as_retriever``."""
         return _FakeRetriever((search_kwargs or {}).get("k", 10))
+
+    def get(self, ids: list[str], include: list[str]) -> dict:
+        """Mimic ``Chroma.get``: the metadata of the records that exist."""
+        records = {doc.id: doc.metadata for doc in _fake_chunks()}
+        records[ESCAPING_ID] = {"image_paths": json.dumps(["dbv2/images/../../secret.txt"])}
+        found = [i for i in ids if i in records]
+        return {"ids": found, "metadatas": [records[i] for i in found]}
 
 
 class FakeBackend:
@@ -149,9 +168,17 @@ def _forbidden(name: str):
 
 
 @pytest.fixture
-def backend(monkeypatch) -> FakeBackend:
-    """Patch every heavy dependency with fakes and turn tracing off."""
+def backend(monkeypatch, tmp_path) -> FakeBackend:
+    """Patch every heavy dependency with fakes and turn tracing off.
+
+    Figure files live under ``tmp_path``, which stands in for the repository
+    root, so no test reads the real ``dbv2/images``.
+    """
     fake = FakeBackend()
+    (tmp_path / "dbv2" / "images").mkdir(parents=True)
+    (tmp_path / "dbv2" / "images" / "tlv1117_c1_img0.jpg").write_bytes(JPEG_BYTES)
+    (tmp_path / "secret.txt").write_text("outside the images folder")
+    monkeypatch.setattr(src.documents, "_PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(api.service, "load_embedding_model", lambda: "fake-embeddings")
     monkeypatch.setattr(api.service, "load_vector_store", fake.load_store)
     monkeypatch.setattr(src.llm, "ChatGoogleGenerativeAI", fake.make_llm)
@@ -230,7 +257,7 @@ def test_retrieve_returns_chunks_with_tables_and_images(client):
 
     assert body["query"] == "LM317 pins"
     assert body["num_chunks"] == 2
-    assert body["total_images"] == 1
+    assert body["total_images"] == 2
     assert body["total_tables"] == 1
 
     first, second = body["chunks"]
@@ -238,10 +265,13 @@ def test_retrieve_returns_chunks_with_tables_and_images(client):
     assert first["source"] == "lm317"
     assert first["raw_text"] == "Pin 1 ADJ, pin 2 VOUT, pin 3 VIN."
     assert first["has_table"] and first["has_image"]
+    assert first["record_id"] == LM317_ID
     assert first["images_base64"] == [base64.b64encode(JPEG_BYTES).decode()]
-    assert first["image_urls"] == [f"/v1/images/{body['response_id']}/0"]
+    assert first["image_urls"] == [], "a figure stored inline has no URL"
     assert "original_content" not in first["metadata"]
-    assert second["image_urls"] == [] and not second["has_image"]
+    assert second["record_id"] == TLV1117_ID
+    assert second["has_image"]
+    assert second["image_urls"] == [f"/v1/images/{TLV1117_ID}/0"]
 
 
 def test_retrieve_rejects_bad_input(client):
@@ -249,18 +279,44 @@ def test_retrieve_rejects_bad_input(client):
     assert client.post("/v1/retrieve", json={"query": "x", "top_k": 31}).status_code == 422
 
 
-def test_image_url_serves_jpeg(client):
+def test_image_url_serves_the_file(client):
     body = client.post("/v1/retrieve", json={"query": "LM317 pins", "top_k": 2}).json()
-    response = client.get(body["chunks"][0]["image_urls"][0])
+    response = client.get(body["chunks"][1]["image_urls"][0])
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/jpeg"
+    assert response.headers["cache-control"] == "public, max-age=86400"
     assert response.content == JPEG_BYTES
 
 
+def test_image_url_is_stable_across_restarts(backend):
+    """The same URL works from a fresh app: nothing is kept between requests."""
+    with TestClient(app) as first:
+        url = first.post("/v1/retrieve", json={"query": "x", "top_k": 2}).json()["chunks"][1]["image_urls"][0]
+    with TestClient(app) as second:
+        assert second.get(url).content == JPEG_BYTES
+
+
 def test_unknown_image_is_404(client):
-    body = client.post("/v1/retrieve", json={"query": "LM317 pins", "top_k": 2}).json()
-    assert client.get(f"/v1/images/{body['response_id']}/5").status_code == 404
-    assert client.get("/v1/images/not-a-response-id/0").status_code == 404
+    assert client.get(f"/v1/images/{TLV1117_ID}/1").status_code == 404, "no second figure"
+    assert client.get("/v1/images/99999999-9999-4999-8999-999999999999/0").status_code == 404
+    assert client.get(f"/v1/images/{LM317_ID}/0").status_code == 404, "inline figures have no file"
+
+
+def test_image_url_must_name_a_record_and_position(client):
+    assert client.get("/v1/images/not-a-uuid/0").status_code == 422
+    assert client.get(f"/v1/images/{TLV1117_ID}/-1").status_code == 422
+    assert client.get("/v1/images/..%2F..%2Fsecret.txt/0").status_code in (404, 422)
+
+
+def test_stored_path_outside_the_images_folder_is_not_served(client):
+    response = client.get(f"/v1/images/{ESCAPING_ID}/0")
+    assert response.status_code == 404
+    assert b"outside the images folder" not in response.content
+
+
+def test_image_with_broken_store_is_503(client, backend):
+    backend.store_error = "store missing"
+    assert client.get(f"/v1/images/{TLV1117_ID}/0").status_code == 503
 
 
 def test_query_returns_answer_and_usage(client, backend):
@@ -272,7 +328,7 @@ def test_query_returns_answer_and_usage(client, backend):
     assert body["answer_characters"] == len("Hello world")
     assert body["num_chunks"] == 2
     assert body["usage"]["input_tokens"] == 10
-    assert body["usage"]["prompt_images"] == 1
+    assert body["usage"]["prompt_images"] == 2
 
     content = backend.prompts[0][0].content
     assert "QUESTION: LM317 pins" in content[0]["text"]
@@ -384,7 +440,7 @@ def test_query_with_text_only_model_gets_no_figures(client, backend):
     assert response.status_code == 200
     assert response.json()["usage"]["prompt_images"] == 0
     assert [part["type"] for part in backend.prompts[0][0].content] == ["text"]
-    assert response.json()["total_images"] == 1, "the response still lists the chunk's figure"
+    assert response.json()["total_images"] == 2, "the response still lists the chunks' figures"
 
 
 def test_query_with_llm_without_max_tokens_uses_catalogue_default(client, backend):

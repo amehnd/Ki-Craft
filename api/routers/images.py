@@ -1,43 +1,56 @@
-"""Figure endpoint: ``GET /v1/images/{response_id}/{index}`` serves one image
-referenced by a chunk's ``image_urls``.
+"""Figure endpoint: ``GET /v1/images/{record_id}/{position}`` serves one figure
+of a stored chunk from disk.
+
+The URL names a record and a position, never a file: the path is looked up in
+the vector store (``api/service.py:RAGService.image``) and must lie inside
+``IMAGES_DIR``. Because a record's figures never change, the URL is stable and
+can be cached.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response
+import uuid
+from typing import Annotated
+
+from fastapi import APIRouter, HTTPException, Path, Request
+from fastapi.responses import FileResponse
+
+from api.openapi_examples import error_responses
 
 router = APIRouter(tags=["images"])
 
 
 @router.get(
-    "/images/{response_id}/{index}",
-    summary="Fetch a figure as JPEG",
+    "/images/{record_id}/{position}",
+    summary="Fetch a figure",
     description=(
-        "Serves one figure referenced by a chunk's ``image_urls``.\n\n"
-        "- ``response_id`` comes from the retrieve/query response and groups "
-        "all figures of that response.\n"
-        "- ``index`` is the **global, 0-based** position of the image across "
-        "the whole response (chunk 2 of a 2-image chunk 1 starts at index 2).\n\n"
+        "Serves one figure listed in a chunk's ``image_urls``.\n\n"
+        "- ``record_id`` is the chunk's id in the vector store (``record_id`` "
+        "in the response).\n"
+        "- ``position`` is the figure's 0-based position within that chunk.\n\n"
         "```\n"
-        "GET /v1/images/79c107621a50474989f2c3eab59beb7a/1\n"
+        "GET /v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0\n"
         "```\n"
-        "Returns the figure as ``image/jpeg``. Entries are cached for 10 "
-        "minutes and expire after ~30; expired or unknown ids return 404."
+        "The URL stays valid across restarts and servers, so responses may be "
+        "cached for a day. An unknown record or position returns 404."
     ),
-    response_description="image/jpeg bytes of the requested figure",
-    responses={404: {"description": "Unknown response_id or expired / out-of-range index"}},
+    response_class=FileResponse,
+    response_description="The figure's bytes (image/jpeg for the current store)",
+    responses={404: {"description": "Unknown record, or no figure at that position"}, **error_responses(503)},
 )
-async def serve_image(response_id: str, index: int, request: Request) -> Response:
-    """Serve one figure from a previous retrieve/query response.
+async def serve_image(
+    request: Request,
+    record_id: uuid.UUID,
+    position: Annotated[int, Path(ge=0)],
+) -> FileResponse:
+    """Serve one stored figure by record id and position.
 
-    Entries expire after ~30 minutes; expired or unknown ids return 404.
+    Raises:
+        HTTPException: 404 when the record or the figure does not exist.
     """
-    raw = request.app.state.service.images.get(response_id, index)
-    if raw is None:
-        raise HTTPException(status_code=404, detail="Image not found or expired")
-    return Response(
-        content=raw,
-        media_type="image/jpeg",
-        headers={"Cache-Control": "private, max-age=600"},
-    )
+    path = await request.app.state.service.image(str(record_id), position)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Image not found")
+    # FileResponse sends the file in pieces and sets the content type from
+    # its extension, plus ETag and Last-Modified for revalidation.
+    return FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})

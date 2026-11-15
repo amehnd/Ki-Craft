@@ -28,7 +28,7 @@ supporting evidence: the exact document chunks, their tables, and their figures.
 | `/v1/retrieve` | POST | Get evidence **without** an answer | `RetrieveResponse` |
 | `/v1/query` | POST | Get evidence **and** a full answer | `QueryResponse` |
 | `/v1/query/stream` | GET | Same as `/v1/query` but token-by-token (SSE) | Server-Sent Events |
-| `/v1/images/{response_id}/{index}` | GET | Fetch one figure as an image | raw JPEG bytes |
+| `/v1/images/{record_id}/{position}` | GET | Fetch one figure as an image (stable URL) | raw JPEG bytes |
 | `/docs` | GET | Swagger UI (try-it-out docs) | HTML |
 
 There are only **three shapes** you need to understand:
@@ -168,16 +168,18 @@ Every figure exists in **two formats**:
    ```
    Pros: works forever, no extra request, no server state. Cons: big JSON payloads.
 
-2. **HTTP URL** — `image_urls[i]`, e.g. `/v1/images/79c10.../1`. Fetch it with
-   `GET {base}/v1/images/79c10.../1` and you get **raw JPEG bytes**
+2. **HTTP URL** — `image_urls[i]`, e.g.
+   `/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/1`. Fetch it with
+   `GET {base}` plus that path and you get **raw JPEG bytes**
    (`Content-Type: image/jpeg`). Use it directly in `<img src>`:
    ```js
    `<img src="${base}${chunk.image_urls[i]}">`
    ```
-   Pros: tiny JSON, browser-cacheable. Cons: **expires** (see §6).
+   Pros: tiny JSON, stable, cacheable for a day (`Cache-Control: public,
+   max-age=86400`).
 
-Both are the **same JPEG**, decoded differently. Pick base64 when you must keep
-the data around, URLs when you want clean, lightweight JSON.
+Both are the **same JPEG**. Prefer the URL: `images_base64` is removed in the
+next API change.
 
 ---
 
@@ -256,24 +258,26 @@ can load them.
 
 ## 6. Dependencies & gotchas (read this)
 
-- **`response_id` ties everything together.** Every chunk's `image_urls` is
-  `/v1/images/{response_id}/{index}`. The `index` is the figure's **global,
-  0-based position across the whole response** — NOT per-chunk. Chunk 2's
-  images start where chunk 1's ended. You never compute this yourself: each
-  chunk's `image_urls` array is already the correct list for that chunk. Just
-  take it as-is.
+- **Image URLs are stable.** Every chunk's `image_urls` is
+  `/v1/images/{record_id}/{position}`: the chunk's id in the vector store (also
+  returned as the chunk's `record_id`) and the figure's 0-based position
+  **within that chunk**. The same figure has the same URL in every response,
+  after a restart and on any server, so you can store it or cache it. Take each
+  chunk's `image_urls` as-is rather than building URLs yourself.
 
-- **Image URLs expire.** The backend keeps figures in memory for ~30 minutes
-  (`response_id` lives in a TTL cache). After that, `GET /v1/images/{id}/{index}`
-  returns `404 Not Found`. This is by design (memory management) — if you must
-  keep images around longer, use `images_base64` instead, or re-run the query.
+- **The URL names a record, not a file.** The server reads the file path from
+  the store; a `record_id` that is not a UUID or a negative `position` is a
+  `422`, and an unknown record or position is a `404`.
 
-- **`response_id` is per-response.** Two different queries → two different ids,
-  even for the same underlying document. Don't reuse an id from a previous
-  response.
+- **Figures stored inline have no URL.** A document ingested with
+  `scripts/ingest.py` stores its figures as base64 inside the store. They still
+  appear in `images_base64` and count in `image_count`, but `image_urls` is
+  empty for them until ingestion writes figure files (planned).
 
-- **Missing / expired images → `404`.** Always handle image load errors in your
-  UI (broken-image fallback), because the 30-minute TTL is real.
+- **`response_id` no longer keys anything.** It is still in responses and will
+  be removed in the next API change.
+
+- **Handle image load errors.** Show a broken-image fallback on a `404`.
 
 - **`raw_text` and `enhanced_content` are different.** `enhanced_content` is
   the AI-summarised, markdown version (nice to read). `raw_text` is the raw OCR

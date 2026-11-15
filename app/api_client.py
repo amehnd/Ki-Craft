@@ -2,7 +2,7 @@
 
 Lets the Streamlit dashboard talk to the API instead of loading the vector
 store and calling the LLM itself.  Image URLs returned by the backend are
-relative (``/v1/images/{response_id}/{index}``); this client rewrites them to
+relative (``/v1/images/{record_id}/{position}``); this client rewrites them to
 absolute URLs so ``st.image`` can load them directly.
 """
 

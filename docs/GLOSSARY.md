@@ -68,7 +68,13 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **API versioning.** Putting a version in every path (`/v1/query`) so the API can change shape later under `/v2` while existing clients keep using `/v1`. Here the prefix is added once, in `api/main.py`'s `include_router(..., prefix="/v1")`; `/` and `/health` stay unversioned so probes never need a new URL.
 
-**Path parameter.** A `{name}` part of a route's path, such as `{index}` in `/v1/images/{response_id}/{index}`. FastAPI passes it to the function parameter with the same name and converts it with that parameter's type hint, returning 422 when the conversion fails.
+**Path parameter.** A `{name}` part of a route's path, such as `{position}` in `/v1/images/{record_id}/{position}`. FastAPI passes it to the function parameter with the same name and converts it with that parameter's type hint, returning 422 when the conversion fails.
+
+**Record id.** The id Chroma gives each stored chunk when it is added, a random UUID such as `004ca22b-a528-444e-9c0e-27c8b5858ff5`. It never changes while the record exists, so figure URLs contain it (`/v1/images/{record_id}/{position}`), and it will become the chunk's primary key in Postgres. Not the same as `chunk_id`, which is only the chunk's position in one response.
+
+**Path traversal.** An attack where a request smuggles `..` or an absolute path into something the server turns into a file path, to read files outside the intended folder. The image route avoids it twice: the URL names a record, not a file, and the stored path must still resolve inside `IMAGES_DIR` (`src/documents.py:image_file`).
+
+**Cache-Control.** A response header that tells browsers and proxies how long they may reuse a response without asking again. Figures are sent with `public, max-age=86400` (anyone may cache them for a day), which is safe because a record's figures never change. `FileResponse` also sends `ETag` and `Last-Modified`, so a client can check cheaply whether its copy is still current.
 
 **MIME type (media type).** A standard label for a kind of content, such as `image/jpeg` or `application/json`, registered with IANA. The server sends it in the `Content-Type` header so the client knows how to read the bytes.
 

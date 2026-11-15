@@ -127,14 +127,19 @@ class QueryRequest(RetrieveRequest):
 class ChunkPayload(BaseModel):
     """One retrieved chunk with its full multimodal content.
 
-    Images are returned twice so callers can pick: inline base64 for quick
-    display, or ``image_urls`` to load each figure over HTTP (the URLs point
-    at ``GET /v1/images/{response_id}/{index}``). The ``index`` is the image's
-    global position across the whole response (0-based), so a chunk's
-    ``image_urls`` list is always the correct list for that chunk.
+    Images are returned twice until 6d-2 removes the base64 copy: inline
+    base64, and ``image_urls`` to load each figure over HTTP. A URL is
+    ``/v1/images/{record_id}/{position}``: the chunk's Chroma record id and
+    the figure's 0-based position within the chunk. It stays valid across
+    restarts and servers. Figures stored inline as base64 (the layout
+    ``scripts/ingest.py`` writes) have no URL.
     """
 
     chunk_id: int = Field(..., description="1-based position in this response")
+    record_id: str | None = Field(
+        None,
+        description="The chunk's id in the vector store; stable, and part of its image URLs",
+    )
     enhanced_content: str = Field(
         ..., description="AI-enhanced searchable summary of the chunk"
     )
@@ -144,7 +149,7 @@ class ChunkPayload(BaseModel):
     images_base64: list[str] = Field(default_factory=list, description="Inline base64 images")
     image_urls: list[str] = Field(
         default_factory=list,
-        description="HTTP URLs to fetch each image (see /v1/images/{response_id}/{index})",
+        description="Stable URL of each figure, /v1/images/{record_id}/{position}",
     )
     has_table: bool = False
     has_image: bool = False
@@ -155,6 +160,7 @@ class ChunkPayload(BaseModel):
         json_schema_extra={
             "example": {
                 "chunk_id": 1,
+                "record_id": "004ca22b-a528-444e-9c0e-27c8b5858ff5",
                 "enhanced_content": (
                     "The LM317 is an adjustable linear voltage regulator. "
                     "Its three pins are: ADJ (adjust), VOUT (output) and "
@@ -173,8 +179,8 @@ class ChunkPayload(BaseModel):
                 "image_count": 2,
                 "images_base64": ["<base64-encoded-jpeg>", "<base64-encoded-jpeg>"],
                 "image_urls": [
-                    "/v1/images/79c107621a50474989f2c3eab59beb7a/0",
-                    "/v1/images/79c107621a50474989f2c3eab59beb7a/1",
+                    "/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0",
+                    "/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/1",
                 ],
                 "has_table": True,
                 "has_image": True,
@@ -195,8 +201,8 @@ class RetrieveResponse(BaseModel):
     response_id: str = Field(
         ...,
         description=(
-            "Key for the image URLs. Every image in this response lives at "
-            "/v1/images/{response_id}/{index} with a 0-based global index."
+            "A random id for this response. It no longer keys the image URLs "
+            "and will be removed."
         ),
     )
     chunks: list[ChunkPayload] = Field(default_factory=list)
@@ -212,14 +218,15 @@ class RetrieveResponse(BaseModel):
                 "chunks": [
                     {
                         "chunk_id": 1,
+                        "record_id": "004ca22b-a528-444e-9c0e-27c8b5858ff5",
                         "enhanced_content": "The LM317 is an adjustable linear voltage regulator...",
                         "raw_text": "Pin 1 (ADJ): ...",
                         "tables_html": ["<table>..."],
                         "image_count": 2,
                         "images_base64": ["<base64-encoded-jpeg>", "<base64-encoded-jpeg>"],
                         "image_urls": [
-                            "/v1/images/79c107621a50474989f2c3eab59beb7a/0",
-                            "/v1/images/79c107621a50474989f2c3eab59beb7a/1",
+                            "/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0",
+                            "/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/1",
                         ],
                         "has_table": True,
                         "has_image": True,
