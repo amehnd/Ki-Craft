@@ -14,6 +14,14 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **MMR (Maximal Marginal Relevance).** A way to pick results that are relevant to the question but different from each other. Here it fetches the 20 nearest chunks and keeps 10, so the prompt does not get five copies of the same table. `src/retrieval/search.py`.
 
+**Search type.** How the vector store picks chunks for one question, set by `RETRIEVAL_SEARCH_TYPE`. `similarity` returns the k nearest; `mmr` returns k relevant but varied chunks from a larger pool; `similarity_score_threshold` returns only chunks scoring above a cutoff. These are LangChain's three `as_retriever` options. `src/retrieval/search.py`.
+
+**lambda_mult.** MMR's balance between relevance and variety: 1 ranks by relevance alone, 0 by difference from the chunks already picked. LangChain's default is 0.5.
+
+**Score threshold.** The minimum relevance score a chunk must reach to be returned. With cosine distance the score is 1 minus the distance. Unlike top-k it can return nothing, which is useful for "not in the documents" answers but needs tuning.
+
+**Re-ranker.** A second, slower model that rescores retrieved candidates against the question, reading both together (a cross-encoder). The usual pattern retrieves 20 to 100 candidates and keeps the best 3 to 10. Not used here yet.
+
 **Hybrid search.** Running a keyword search and a vector search together and merging the results. Keyword search catches exact tokens such as `TLV1117-33` or `VREF` that embeddings blur. Planned once the data is on Postgres.
 
 **RRF (Reciprocal Rank Fusion).** A simple way to merge two ranked lists: each result scores `1 / (k + rank)` in every list it appears in, and the scores are added. It needs no tuning of score scales, which is why hybrid search usually uses it.

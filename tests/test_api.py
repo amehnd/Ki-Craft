@@ -139,7 +139,6 @@ def backend(monkeypatch) -> FakeBackend:
     fake = FakeBackend()
     monkeypatch.setattr(api.service, "load_embedding_model", lambda: "fake-embeddings")
     monkeypatch.setattr(api.service, "load_vector_store", fake.load_store)
-    monkeypatch.setattr(api.service, "build_retriever", lambda db: db.as_retriever())
     monkeypatch.setattr(src.llm, "ChatGoogleGenerativeAI", fake.make_llm)
     monkeypatch.setattr(src.llm, "ChatOpenAI", fake.make_llm)
     monkeypatch.setattr(src.retrieval.search, "Chroma", _forbidden("Chroma"))

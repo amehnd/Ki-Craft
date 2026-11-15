@@ -182,14 +182,17 @@ Verification: run the evaluation set against Chroma and against pgvector. Identi
 
 ## 6. Retrieval
 
-**Today:** MMR with `k=10` and `fetch_k=20` (`src/retrieval/search.py`). The prompt then uses the text of only the first 5 chunks but the images of all 10, which is inconsistent and is a bug to fix.
+**Today:** MMR with `k=10` and `fetch_k=20` (`src/retrieval/search.py`). The search type is a setting (`RETRIEVAL_SEARCH_TYPE`: `similarity`, `mmr`, or `similarity_score_threshold`), and each type's parameters are environment variables, so the evaluation set can compare them without code changes. The prompt then uses the text of only the first 5 chunks but the images of all 10; Checkpoint 2 replaces that hidden limit with `top_k` and an image cap.
 
 | Option | Strengths | Weaknesses |
 |---|---|---|
 | Plain similarity top-k | Simplest; the most relevant chunks | Near-duplicates (the same table on two pages) crowd out other evidence |
 | MMR (current) | Diversity across sections | Can push out the second-best relevant chunk; the lambda setting is a magic number |
 | Hybrid (Postgres full-text plus dense, fused with RRF) (chosen, after the migration) | Exact matches on part numbers, pin names, and parameter symbols | Tuning the fusion; free once on Postgres |
-| Cross-encoder reranker on the top 20 to 30 | Large precision gains | An extra model call per query |
+| Similarity score threshold | Drops weak matches instead of always returning k | Can return no chunks; the threshold must be tuned on the evaluation set |
+| Cross-encoder reranker on the top 20 to 30 (future option) | Large precision gains | An extra model call per query; a general-purpose reranker can lower precision on technical text, so test it first |
+| Query rewriting: multi-query or HyDE (to research) | Bridges wording gaps between the question and the summaries | One extra LLM call before retrieval |
+| Parent document, small-to-big (to research) | Match on small chunks, answer from the whole section | Needs a parent id on every chunk |
 | Metadata filtering by document or document type (to research) | Required once users have their own documents | Needs a document ID on every chunk |
 
 pgvector has no built-in MMR. Fetch the 20 nearest rows in SQL and apply MMR in Python. It is about 15 lines of code and easy to explain.
@@ -200,8 +203,11 @@ For datasheets, hybrid search is the most valuable addition, because questions c
 
 **Owner (2026-11-13):** go hybrid once on Postgres, since Postgres gives full-text search for free. Metadata filtering by document and by document type is wanted, but the design (which fields, who sets the type, how the UI exposes it) still needs thought.
 
+**Owner (2026-11-15):** the search type and its parameters are settings, so the evaluation set decides between them. Re-ranking (for example, pool 20 and re-rank to 5) waits until the first evaluation results show it is needed. The common pattern is to retrieve 20 to 100 candidates and re-rank to 3 to 10.
+
 **Status:**
-- Fix the 5-versus-10 inconsistency (Checkpoint 3).
+- Search type configurable (Checkpoint 2, done).
+- Replace the hidden 5-chunk limit with `top_k` and an image cap (Checkpoint 2).
 - Add document filtering (Checkpoint 7).
 - Add hybrid search after the migration.
 

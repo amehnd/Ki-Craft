@@ -11,10 +11,25 @@ the pipeline stage it controls.
 from __future__ import annotations
 
 import os
+from typing import Literal, get_args
+
 from dotenv import load_dotenv
 
 # Load secrets from a .env file if present (safe to call multiple times).
 load_dotenv()
+
+
+def _env_choice(name: str, default: str, allowed: tuple[str, ...]) -> str:
+    """Read ``name`` from the environment and check it is one of ``allowed``.
+
+    Raises:
+        ValueError: If the variable is set to a value not in ``allowed``, so a
+            typo stops the process at startup instead of failing per query.
+    """
+    value = os.getenv(name, default)
+    if value not in allowed:
+        raise ValueError(f"{name}={value!r} is not one of: {', '.join(allowed)}")
+    return value
 
 # ---------------------------------------------------------------------------
 # API credentials (loaded from environment / .env)
@@ -53,9 +68,31 @@ IMAGES_DIR: str = "dbv2/images"
 # ---------------------------------------------------------------------------
 # Retrieval settings
 # ---------------------------------------------------------------------------
-RETRIEVAL_K: int = 10          # Number of chunks to return.
-RETRIEVAL_FETCH_K: int = 20    # Candidate pool before MMR re-ranking.
-RETRIEVAL_SEARCH_TYPE: str = "mmr"
+# How the vector store picks chunks for a question. These are the three
+# search types LangChain's ``as_retriever`` accepts:
+#   similarity                  the k nearest chunks by cosine similarity
+#   mmr                         fetch RETRIEVAL_FETCH_K nearest, keep k that are
+#                               relevant and different from each other
+#   similarity_score_threshold  the nearest chunks scoring at least
+#                               RETRIEVAL_SCORE_THRESHOLD, at most k; can
+#                               return none
+# Every value below can be overridden by an environment variable of the same
+# name, so an evaluation run can compare them without editing code.
+RetrievalSearchType = Literal["similarity", "mmr", "similarity_score_threshold"]
+RETRIEVAL_SEARCH_TYPES: tuple[str, ...] = get_args(RetrievalSearchType)
+RETRIEVAL_SEARCH_TYPE: RetrievalSearchType = _env_choice(  # type: ignore[assignment]
+    "RETRIEVAL_SEARCH_TYPE", "mmr", RETRIEVAL_SEARCH_TYPES
+)
+# Number of chunks to return.
+RETRIEVAL_K: int = int(os.getenv("RETRIEVAL_K", "10"))
+# mmr only: candidate pool the k chunks are chosen from.
+RETRIEVAL_FETCH_K: int = int(os.getenv("RETRIEVAL_FETCH_K", "20"))
+# mmr only: 1 ranks purely by relevance, 0 purely by diversity. 0.5 is
+# LangChain's default, so setting it here changes nothing until overridden.
+RETRIEVAL_LAMBDA_MULT: float = float(os.getenv("RETRIEVAL_LAMBDA_MULT", "0.5"))
+# similarity_score_threshold only: minimum relevance score (0 to 1; with
+# cosine distance the score is 1 - distance).
+RETRIEVAL_SCORE_THRESHOLD: float = float(os.getenv("RETRIEVAL_SCORE_THRESHOLD", "0.5"))
 
 # ---------------------------------------------------------------------------
 # Generation settings

@@ -17,12 +17,7 @@ import asyncio
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from config.settings import (
-    GENERATION_MODEL,
-    RETRIEVAL_FETCH_K,
-    RETRIEVAL_K,
-    RETRIEVAL_SEARCH_TYPE,
-)
+from config.settings import GENERATION_MODEL, RETRIEVAL_K
 from src.documents import extract_original_data
 from src.embed import load_embedding_model
 from src.logger import get_logger
@@ -69,10 +64,7 @@ class RAGService:
         if self._db is None:
             raise RuntimeError("Vector store is not loaded")
         if top_k and top_k != RETRIEVAL_K:
-            return self._db.as_retriever(
-                search_type=RETRIEVAL_SEARCH_TYPE,
-                search_kwargs={"k": top_k, "fetch_k": max(top_k, RETRIEVAL_FETCH_K)},
-            )
+            return build_retriever(self._db, top_k)
         return self._retriever
 
     # -- operations ---------------------------------------------------------

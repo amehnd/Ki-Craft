@@ -385,9 +385,11 @@ Every tunable lives in `config/settings.py`.
 | `EMBEDDING_MAX_INPUT_TOKENS` | `512` | The model's input limit; longer text is truncated |
 | `GENERATION_MODEL` | `gemini-3.5-flash-lite` | Default answer model |
 | `GENERATION_MAX_TOKENS` | `512` | Output limit per answer (environment variable) |
-| `RETRIEVAL_SEARCH_TYPE` | `mmr` | Retrieval method |
-| `RETRIEVAL_K` | `10` | Chunks returned |
-| `RETRIEVAL_FETCH_K` | `20` | Candidates fetched before MMR picks `RETRIEVAL_K` |
+| `RETRIEVAL_SEARCH_TYPE` | `mmr` | `similarity`, `mmr`, or `similarity_score_threshold` (environment variable; anything else stops startup) |
+| `RETRIEVAL_K` | `10` | Chunks returned (environment variable) |
+| `RETRIEVAL_FETCH_K` | `20` | MMR only: candidates fetched before MMR picks `RETRIEVAL_K` (environment variable) |
+| `RETRIEVAL_LAMBDA_MULT` | `0.5` | MMR only: 1 is pure relevance, 0 is pure diversity (environment variable) |
+| `RETRIEVAL_SCORE_THRESHOLD` | `0.5` | `similarity_score_threshold` only: minimum relevance score (environment variable) |
 | `CHROMA_PERSIST_DIR` | `dbv2/chroma_db` | Vector store location |
 | `IMAGES_DIR` | `dbv2/images` | Figure files |
 | `PDF_STRATEGY` | `hi_res` | `unstructured` parsing mode |
