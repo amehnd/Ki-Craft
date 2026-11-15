@@ -1,7 +1,7 @@
 """Retrieval pipeline entry point.
 
-Loads the vector store, builds the retriever, and answers a query with the
-multimodal LLM.
+Loads the vector store, builds the retriever, and streams the answer to one
+question from the default multimodal LLM.
 
 Usage:
     python -m scripts.query
@@ -14,9 +14,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from config.settings import GENERATION_MODEL
 from src.embed import load_embedding_model
 from src.logger import get_logger
-from src.retrieval.generate import answer_query
+from src.retrieval.generate import answer_query_stream, default_llm
 from src.retrieval.search import build_retriever, load_vector_store
 
 logger = get_logger(__name__)
@@ -38,9 +39,10 @@ def main() -> None:
         logger.warning("No query provided.")
         return
 
-    final_answer = answer_query(retriever, query)
     print("\n" + "-" * 5)
-    print(final_answer)
+    for token in answer_query_stream(retriever, query, default_llm(), GENERATION_MODEL):
+        print(token, end="", flush=True)
+    print()
 
 
 if __name__ == "__main__":

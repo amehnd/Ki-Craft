@@ -13,15 +13,20 @@ from typing import Annotated
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-from api.custom_service import run_custom_query
 from api.openapi_examples import (
     CUSTOM_QUERY_BODY_EXAMPLES,
     QUERY_BODY_EXAMPLES,
     QUERY_PARAM_EXAMPLES,
     RICH_DESCRIPTION_COMMON,
 )
-from api.schemas import CustomQueryRequest, CustomQueryResponse, QueryRequest, QueryResponse
-from src.retrieval.generate import answer_query_stream
+from api.schemas import (
+    CustomQueryRequest,
+    CustomQueryResponse,
+    QueryRequest,
+    QueryResponse,
+    UsageMetadata,
+)
+from src.llm import create_llm
 
 router = APIRouter(tags=["generation"])
 
@@ -112,11 +117,10 @@ async def query_stream(
     """
     service = request.app.state.service
     await service.ensure_ready()
-    retriever = service.get_retriever(top_k)
 
     def generate():
         try:
-            stream = answer_query_stream(retriever, query, max_images=max_images)
+            stream = service.stream_answer(query, top_k, max_images)
             chunks = stream.chunks
             base = service.to_retrieve_response(query, chunks)
             yield _sse("retrieval", base.model_dump())
@@ -165,29 +169,32 @@ async def query_custom(
 ) -> CustomQueryResponse:
     """Retrieve chunks and generate an answer with a custom provider/model/key."""
     try:
-        answer, base, usage = await run_custom_query(
-            service=request.app.state.service,
-            query=req.query,
-            top_k=req.top_k,
-            provider_id=req.provider,
-            model_id=req.model,
-            api_key=req.api_key,
+        # Built before retrieval, so an unknown provider or model fails fast.
+        llm = create_llm(
+            req.provider,
+            req.model,
+            req.api_key,
             temperature=req.temperature,
             max_tokens=req.max_tokens,
-            max_images=req.max_images,
+            thinking=req.thinking,
+        )
+        answer, base, usage = await request.app.state.service.answer(
+            req.query,
+            req.top_k,
+            req.max_images,
+            llm=llm,
+            model_id=req.model,
             thinking=req.thinking,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
-    # Merge usage into base response
-    from api.schemas import UsageMetadata
     usage_metadata = None
     if usage and "error" not in usage:
         usage_metadata = UsageMetadata(**usage)
 
     return CustomQueryResponse(
-        **base,
+        **base.model_dump(),
         answer=answer,
         answer_characters=len(answer),
         usage=usage_metadata,

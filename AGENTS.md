@@ -44,7 +44,7 @@ After each change, write the walkthrough like this:
 Start: api/routers/query.py:query()          the HTTP entry point
   -> api/service.py:RAGService.answer()      loads the store once, retrieves
   -> src/retrieval/search.py:retrieve_chunks()  returns list[Document]
-  -> src/retrieval/generate.py:generate_answer() builds the prompt, calls the LLM
+  -> src/retrieval/generate.py:generate_answer_stream() builds the prompt, streams the LLM
 Data: QueryRequest -> list[Document] (metadata: raw_text, tables_html, image_paths) -> str answer -> QueryResponse
 Try: set a breakpoint in X, or run the command below, and look at Y.
 ```
@@ -103,8 +103,7 @@ src/tracing.py          LangSmith helpers
 api/main.py             FastAPI app: CORS, lifespan, include_router calls
 api/routers/            endpoints by purpose: system, retrieval, query, images
 api/openapi_examples.py docs text and example payloads shown at /docs
-api/service.py          RAGService: owns the store and retriever for the process
-api/custom_service.py   /query/custom: same retrieval, user-chosen LLM
+api/service.py          RAGService: owns the store and retriever, picks the default LLM
 api/images.py           in-memory registry that serves figure JPEGs by URL
 api/schemas.py          Pydantic request and response models
 app/dashboard.py        Streamlit UI (2,100 lines, to be split into pages)

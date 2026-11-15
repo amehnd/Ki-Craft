@@ -14,6 +14,7 @@ from src.retrieval.generate import (
     _estimate_cost,
     _extract_text,
     _prompt_stats,
+    _trace_inputs,
 )
 
 
@@ -80,3 +81,19 @@ def test_prompt_stats_counts_text_and_images():
     chars, images = _prompt_stats(content)
     assert chars == 5
     assert images == 2
+
+
+def test_trace_inputs_keep_the_question_and_drop_objects():
+    """Only plain values reach LangSmith; the chat model (and its key) never does."""
+    recorded = _trace_inputs(
+        {
+            "retriever": object(),
+            "query": "LM555 pins?",
+            "llm": object(),
+            "model_id": "gemini-3.5-flash-lite",
+            "chunks": ["a", "b"],
+            "max_images": 0,
+            "thinking": False,
+        }
+    )
+    assert recorded == {"question": "LM555 pins?", "max_images": 0, "thinking": False, "num_chunks": 2}

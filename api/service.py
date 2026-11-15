@@ -5,20 +5,28 @@ thread-safe service so endpoints stay thin.  All heavy work (embedding model
 load, Chroma load, LLM calls) runs in a worker thread via ``asyncio.to_thread``
 so FastAPI's event loop is never blocked.
 
-Every query reuses the single-trace path from the codebase
-(``answer_query_stream``), so the LangSmith UI shows one ``AnswerQuery`` run
-with ``RetrieveChunks`` and ``GenerateAnswerStream`` nested underneath.
+Every query, with the default model or a caller-chosen one, goes through
+``stream_answer`` and so through the one generation path
+(``answer_query_stream``). The LangSmith UI shows one ``AnswerQuery`` run with
+``RetrieveChunks`` and ``GenerateAnswerStream`` nested underneath.
 """
 
 from __future__ import annotations
 
 import asyncio
 
-from config.settings import RETRIEVAL_FETCH_K, RETRIEVAL_K, RETRIEVAL_SEARCH_TYPE
+from langchain_core.language_models.chat_models import BaseChatModel
+
+from config.settings import (
+    GENERATION_MODEL,
+    RETRIEVAL_FETCH_K,
+    RETRIEVAL_K,
+    RETRIEVAL_SEARCH_TYPE,
+)
 from src.documents import extract_original_data
 from src.embed import load_embedding_model
 from src.logger import get_logger
-from src.retrieval.generate import answer_query_stream
+from src.retrieval.generate import answer_query_stream, default_llm
 from src.retrieval.search import build_retriever, load_vector_store, retrieve_chunks
 
 from api.images import ImageRegistry
@@ -76,25 +84,69 @@ class RAGService:
         chunks = await asyncio.to_thread(retrieve_chunks, retriever, query)
         return self.to_retrieve_response(query, chunks)
 
-    async def answer(self, query: str, top_k: int, max_images: int = 0) -> tuple[str, RetrieveResponse, dict]:
+    def stream_answer(
+        self,
+        query: str,
+        top_k: int,
+        max_images: int = 0,
+        llm: BaseChatModel | None = None,
+        model_id: str | None = None,
+        thinking: bool = False,
+    ):
+        """Retrieve chunks and return the answer as a token stream.
+
+        Blocking: call it from a worker thread, after ``ensure_ready``. This is
+        the one place that picks the default model when no ``llm`` is given.
+
+        Args:
+            query: The user's question.
+            top_k: How many chunks to retrieve.
+            max_images: Max images to send to the model (0 = all).
+            llm: A chat model from ``src/llm.py:create_llm``; the default
+                Gemini model when omitted.
+            model_id: The catalogue id of ``llm``, recorded in usage. Ignored
+                when ``llm`` is omitted.
+            thinking: Ask the model to show its reasoning.
+
+        Returns:
+            The iterator from ``answer_query_stream``: it yields tokens and
+            exposes ``chunks`` and ``usage``.
+        """
+        if llm is None:
+            llm, model_id = default_llm(), GENERATION_MODEL
+        return answer_query_stream(
+            self.get_retriever(top_k),
+            query,
+            llm,
+            model_id,
+            max_images=max_images,
+            thinking=thinking,
+        )
+
+    async def answer(
+        self,
+        query: str,
+        top_k: int,
+        max_images: int = 0,
+        llm: BaseChatModel | None = None,
+        model_id: str | None = None,
+        thinking: bool = False,
+    ) -> tuple[str, RetrieveResponse, dict]:
         """Retrieve chunks and generate a full answer.
 
-        Uses ``answer_query_stream`` so retrieval and generation stay under a
-        single ``AnswerQuery`` trace; the answer is built by consuming every
-        streamed token.
+        Consumes every token from :meth:`stream_answer`, so the arguments are
+        the same and retrieval and generation stay under a single trace.
 
         Returns:
             A tuple of ``(answer, retrieve_response, usage)`` where ``usage``
             carries token counts, model, latency and cost estimate.
         """
         await self.ensure_ready()
-        retriever = self.get_retriever(top_k)
 
         def _run() -> tuple[str, list, dict]:
-            stream = answer_query_stream(retriever, query, max_images=max_images)
-            chunks = stream.chunks
+            stream = self.stream_answer(query, top_k, max_images, llm, model_id, thinking)
             answer = "".join(stream)
-            return answer, chunks, stream.usage
+            return answer, stream.chunks, stream.usage
 
         answer, chunks, usage = await asyncio.to_thread(_run)
         return answer, self.to_retrieve_response(query, chunks), usage

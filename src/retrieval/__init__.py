@@ -5,9 +5,8 @@ CLI can build a full RAG query in a few calls.
 """
 
 from src.retrieval.generate import (
-    answer_query,
     answer_query_stream,
-    generate_answer,
+    default_llm,
     generate_answer_stream,
 )
 from src.retrieval.search import (
@@ -20,8 +19,7 @@ __all__ = [
     "load_vector_store",
     "build_retriever",
     "retrieve_chunks",
-    "generate_answer",
+    "default_llm",
     "generate_answer_stream",
-    "answer_query",
     "answer_query_stream",
 ]

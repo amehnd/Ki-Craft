@@ -1,16 +1,16 @@
 """Answer generation using a multimodal LLM.
 
 Builds the prompt from retrieved chunks (enhanced summaries + HTML tables +
-base64 images), calls Gemini to generate an answer, and wraps both retrieval
-and generation under a single LangSmith trace so the whole query shows up as
-one run in the UI.
+base64 images), streams an answer from the chat model it is given, and wraps
+both retrieval and generation under a single LangSmith trace so the whole
+query shows up as one run in the UI. The default model and a user-chosen
+model share this one path; only the ``llm`` passed in differs.
 """
 
 from __future__ import annotations
 
 import base64
 import time
-from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.documents import Document
@@ -35,14 +35,6 @@ from src.retrieval.search import retrieve_chunks
 from src.tracing import summarize_chunks
 
 logger = get_logger(__name__)
-
-
-@dataclass
-class GenerationResult:
-    """Answer plus the usage metadata collected during generation."""
-
-    answer: str
-    usage: dict[str, Any]
 
 
 def _capture_usage(obj: Any, usage: dict[str, Any]) -> None:
@@ -171,8 +163,12 @@ def _build_message_content(chunks: list[Document], query: str, max_images: int =
     return content
 
 
-def _create_llm() -> BaseChatModel:
-    """Create the default chat model configured in ``config/settings.py``."""
+def default_llm() -> BaseChatModel:
+    """Create the default chat model configured in ``config/settings.py``.
+
+    Its model id is ``GENERATION_MODEL``, which callers pass alongside it as
+    the ``model_id`` that labels usage.
+    """
     return create_llm(
         GENERATION_PROVIDER,
         GENERATION_MODEL,
@@ -180,65 +176,6 @@ def _create_llm() -> BaseChatModel:
         temperature=GENERATION_TEMPERATURE,
         max_tokens=GENERATION_MAX_TOKENS,
     )
-
-
-@traceable(run_type="llm", name="GenerateAnswer")
-def generate_answer(
-    chunks: list[Document], query: str, verbose: bool = False
-) -> GenerationResult:
-    """Generate a final answer using the multimodal LLM.
-
-    Args:
-        chunks: Retrieved document chunks.
-        query: The original user query.
-        verbose: If True, logs additional debug detail.
-
-    Returns:
-        A :class:`GenerationResult` with the answer string and usage metadata
-        (tokens, model, latency, prompt size, estimated cost).
-    """
-    try:
-        chunk_summaries = summarize_chunks(chunks)
-        total_images = sum(c.get("image_count", 0) for c in chunk_summaries)
-        total_tables = sum(c.get("table_count", 0) for c in chunk_summaries)
-
-        llm = _create_llm()
-        message_content = _build_message_content(chunks, query)
-
-        message = HumanMessage(content=message_content)
-        start = time.perf_counter()
-        response = llm.invoke([message])
-        latency_ms = round((time.perf_counter() - start) * 1000, 1)
-
-        answer_text = _extract_text(response.content)
-
-        prompt_chars, prompt_images = _prompt_stats(message_content)
-        usage: dict[str, Any] = {
-            "model": GENERATION_MODEL,
-            "latency_ms": latency_ms,
-            "prompt_chars": prompt_chars,
-            "prompt_images": prompt_images,
-            "chunks_used": min(len(chunks), 5),
-        }
-        _capture_usage(response, usage)
-        usage["estimated_cost_usd"] = _estimate_cost(usage)
-
-        logger.info(
-            "LangSmith trace: %d chunks, %d images, %d tables; usage=%s",
-            len(chunks),
-            total_images,
-            total_tables,
-            usage,
-        )
-        return GenerationResult(answer=answer_text, usage=usage)
-
-    except Exception as e:
-        error_msg = f"Answer generation failed: {e}"
-        if verbose:
-            logger.exception(error_msg)
-        else:
-            logger.warning(error_msg)
-        return GenerationResult(answer=error_msg, usage={"error": error_msg})
 
 
 def _collect_image_attachments(chunks: list[Document]) -> dict:
@@ -266,6 +203,25 @@ def _attach_images_to_trace(run_tree, chunks: list[Document]) -> None:
     attachments = _collect_image_attachments(chunks)
     if attachments:
         run_tree.attachments = attachments
+
+
+def _trace_inputs(inputs: dict) -> dict:
+    """Choose what LangSmith records as a generation run's inputs.
+
+    The retriever, the chunks and the chat model object are left out: they
+    serialise to long reprs, and the model object carries the caller's key.
+    The question is the only text input, so the LangSmith runs table previews
+    it; the model id goes into run metadata instead (see
+    :func:`answer_query_stream`).
+    """
+    recorded = {
+        "question": inputs.get("query"),
+        "max_images": inputs.get("max_images"),
+        "thinking": inputs.get("thinking"),
+    }
+    if "chunks" in inputs:
+        recorded["num_chunks"] = len(inputs["chunks"])
+    return recorded
 
 
 class _StreamWrapper:
@@ -297,74 +253,86 @@ class _StreamWrapper:
         return next(self._gen)
 
 
-@traceable(run_type="chain", name="AnswerQuery", dangerously_allow_filesystem=True)
-def answer_query(retriever, query: str, run_tree=None) -> str:
-    """Retrieve chunks then generate an answer under a single LangSmith trace.
-
-    Images from retrieved chunks are attached to the trace so they render in
-    the LangSmith UI.  ``run_tree`` is injected by LangSmith.
-
-    Args:
-        retriever: Vector store retriever.
-        query: The user's question.
-
-    Returns:
-        The generated answer string.
-    """
-    chunks = retrieve_chunks(retriever, query)
-    _attach_images_to_trace(run_tree, chunks)
-    return generate_answer(chunks, query).answer
-
-
-@traceable(run_type="chain", name="AnswerQuery", dangerously_allow_filesystem=True)
-def answer_query_stream(retriever, query: str, run_tree=None, max_images: int = 0):
+@traceable(
+    run_type="chain",
+    name="AnswerQuery",
+    process_inputs=_trace_inputs,
+    dangerously_allow_filesystem=True,
+)
+def answer_query_stream(
+    retriever,
+    query: str,
+    llm: BaseChatModel,
+    model_id: str,
+    *,
+    max_images: int = 0,
+    thinking: bool = False,
+    run_tree=None,
+) -> _StreamWrapper:
     """Retrieve chunks then stream an answer under a single LangSmith trace.
 
-    Yields answer tokens as they are produced.  The retrieved chunks are
-    available via the returned generator's ``chunks`` attribute once
-    retrieval completes.  ``run_tree`` is injected by LangSmith.
+    This is the one generation path: the default model and a user-chosen
+    model both come through here, differing only in the ``llm`` passed in.
+    ``run_tree`` is injected by LangSmith.
 
     Args:
         retriever: Vector store retriever.
         query: The user's question.
+        llm: The chat model to answer with (see ``src/llm.py``).
+        model_id: The model's catalogue id, recorded in ``usage``.
         max_images: Max images to send to the model (0 = all).
+        thinking: Ask the model to show its reasoning in the prompt.
 
-    Yields:
-        Answer token strings.  The wrapper's ``chunks`` and ``usage``
-        attributes expose the retrieved chunks and token usage once done.
+    Returns:
+        An iterator of answer token strings. Its ``chunks`` attribute holds
+        the retrieved chunks at once; ``usage`` is filled as the stream is
+        consumed.
     """
+    if run_tree is not None:
+        run_tree.add_metadata({"model": model_id})
     chunks = retrieve_chunks(retriever, query)
     _attach_images_to_trace(run_tree, chunks)
 
     usage: dict[str, Any] = {}
     return _StreamWrapper(
-        generate_answer_stream(chunks, query, usage=usage, max_images=max_images),
+        generate_answer_stream(
+            chunks,
+            query,
+            llm,
+            model_id,
+            usage=usage,
+            max_images=max_images,
+            thinking=thinking,
+        ),
         chunks,
         run_tree,
         usage=usage,
     )
 
 
-@traceable(run_type="llm", name="GenerateAnswerStream")
+@traceable(run_type="llm", name="GenerateAnswerStream", process_inputs=_trace_inputs)
 def generate_answer_stream(
     chunks: list[Document],
     query: str,
-    verbose: bool = False,
+    llm: BaseChatModel,
+    model_id: str,
+    *,
     usage: dict[str, Any] | None = None,
     max_images: int = 0,
+    thinking: bool = False,
 ):
-    """Generate a streaming answer using the multimodal LLM.
-
-    Yields answer tokens as they are generated by the LLM.  ``usage`` is an
-    optional shared dict (populated in-place as the stream runs) used by
-    :func:`answer_query_stream` to expose token usage to callers; a fresh one
-    is created when omitted.
+    """Stream an answer from ``llm`` for already retrieved chunks.
 
     Args:
         chunks: Retrieved document chunks.
         query: The original user query.
-        verbose: If True, logs additional debug detail.
-        usage: Optional mutable dict to receive usage metadata.
+        llm: The chat model to answer with.
+        model_id: The model's catalogue id, recorded in ``usage``.
+        usage: Optional shared dict filled in place with token counts,
+            latency and prompt size as the stream runs; a fresh one is used
+            when omitted.
+        max_images: Max images to send to the model (0 = all).
+        thinking: Append an instruction asking for step-by-step reasoning.
 
     Yields:
         Answer token strings.
@@ -378,8 +346,6 @@ def generate_answer_stream(
             total_images = sum(c.get("image_count", 0) for c in chunk_summaries)
             total_tables = sum(c.get("table_count", 0) for c in chunk_summaries)
 
-            llm = _create_llm()
-
             logger.info("  %d chunks received by generation", len(chunks))
             for ci, c in enumerate(chunks[:5]):
                 od = extract_original_data(c)
@@ -392,11 +358,17 @@ def generate_answer_stream(
                 )
 
             message_content = _build_message_content(chunks, query, max_images)
+            if thinking:
+                message_content[0]["text"] += (
+                    "\n\nBefore answering, show your reasoning step-by-step "
+                    "wrapped in <think> and <think> tags. "
+                    "Then provide your final answer after the </think> tag."
+                )
 
             prompt_chars, prompt_images = _prompt_stats(message_content)
             usage.update(
                 {
-                    "model": GENERATION_MODEL,
+                    "model": model_id,
                     "prompt_chars": prompt_chars,
                     "prompt_images": prompt_images,
                     "chunks_used": min(len(chunks), 5),

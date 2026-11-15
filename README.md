@@ -416,9 +416,9 @@ src/
     search.py              loads Chroma, builds the MMR retriever, retrieves
     generate.py            builds the multimodal prompt, calls the LLM, streams
 api/
-  main.py                FastAPI app and endpoints
-  service.py             owns the store and retriever for the process
-  custom_service.py      /query/custom: same retrieval, user-chosen LLM
+  main.py                FastAPI app: CORS, lifespan, routers
+  routers/               endpoints by purpose: system, retrieval, query, images
+  service.py             owns the store and retriever, picks the default LLM
   images.py              serves figure JPEGs by URL
   schemas.py             request and response models
 app/
