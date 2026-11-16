@@ -48,6 +48,10 @@ def partition_document(file_path: str | Path) -> list:
         filename=str(pdf_path),
         strategy=PDF_STRATEGY,
         extract_image_block_types=PDF_EXTRACT_IMAGE_BLOCK_TYPES,
+        # Put each figure on its element as metadata.image_base64, which
+        # enrich.separate_content_types reads. Without it unstructured writes
+        # the figures to a ./figures folder and the elements carry none.
+        extract_image_block_to_payload=True,
         infer_table_structure=PDF_INFER_TABLE_STRUCTURE,
         extract_images_in_pdf=False,
         chunking_strategy=None,
