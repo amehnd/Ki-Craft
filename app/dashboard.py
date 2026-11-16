@@ -68,7 +68,7 @@ PROJECT_LINKS: list[tuple[str, str]] = [
     ("GitHub", GITHUB_URL),
     ("Live App", LIVE_APP_URL),
     ("Evaluation Dashboard", EVAL_DASHBOARD_URL),
-    ("API Reference", f"{GITHUB_URL}/blob/main/API.md"),
+    ("API Reference", f"{GITHUB_URL}/blob/main/docs/API.md"),
     ("LangSmith", "https://smith.langchain.com/"),
 ]
 

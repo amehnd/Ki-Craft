@@ -259,7 +259,7 @@ Stream an answer:
 curl -N http://127.0.0.1:8001/v1/query/stream -H 'Content-Type: application/json' -d '{"query": "What is the output voltage range of the LM317?"}'
 ```
 
-The full request and response shapes are in [API.md](API.md).
+The full request and response shapes are in [docs/API.md](docs/API.md).
 
 Opening the Chroma store rewrites tracked files under `dbv2/chroma_db`. After running the API from a clone you intend to commit from, restore them:
 
@@ -500,4 +500,4 @@ The current phase is a refactor that makes the codebase small and explainable be
 | [docs/TRADEOFFS.md](docs/TRADEOFFS.md) | Why each component is built the way it is, the alternatives, and the current choice |
 | [docs/PRODUCT_RESEARCH.md](docs/PRODUCT_RESEARCH.md) | What people who upload datasheets need, and where this project can stand out |
 | [docs/GLOSSARY.md](docs/GLOSSARY.md) | Plain-language explanations of the technical terms |
-| [API.md](API.md) | Request and response shapes for every endpoint |
+| [docs/API.md](docs/API.md) | Request and response shapes for every endpoint |

@@ -175,7 +175,7 @@ once.
 ## 4. Streaming the answer (`/v1/query/stream`)
 
 `POST /v1/query/stream` takes the same JSON body as `POST /v1/query`. The
-response uses **[Server-Sent Events](docs/GLOSSARY.md#api-and-serving)**
+response uses **[Server-Sent Events](GLOSSARY.md#api-and-serving)**
 (`Content-Type: text/event-stream`). The server waits for the first answer
 fragment before sending the response headers.
 
