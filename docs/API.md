@@ -33,7 +33,7 @@ supporting evidence: the exact document chunks, their tables, and their figures.
 
 There are only **three shapes** you need to understand:
 
-1. **Request** — `{"query": "...", "top_k": 5, "max_images": 3}` (`top_k` and `max_images` optional), plus an optional `llm` object on both query endpoints to pick the model.
+1. **Request** — `{"query": "...", "top_k": 5}` (`top_k` optional). The two query endpoints also take an optional `max_images` and an optional `llm` object to pick the model.
 2. **`RetrieveResponse`** — the chunks + everything they contain.
 3. **`QueryResponse`** — the same, plus `answer`, `answer_characters` and `figures`.
 
@@ -71,11 +71,11 @@ Both query endpoints also accept an optional `llm` object.
 |---|---|---|---|
 | `query` | string | 1–2000 chars | The question you want answered |
 | `top_k` | integer | 1–30, default 5 | How many document chunks to fetch. Every fetched chunk's text and tables go to the model, so more chunks = more evidence, but a longer prompt. |
-| `max_images` | integer | 0–50, default 3 | Most figures sent to the model, taken in chunk order. 0 sends every image. Images cost far more tokens than text. A text-only model (`supports_vision` false in `config/providers.py`) is sent none, whatever this says. |
+| `max_images` | integer | 0–50, default 3 | Query endpoints only. Most figures sent to the model, taken in chunk order. 0 sends every image. Images cost far more tokens than text. A text-only model (`supports_vision` false in `config/providers.py`) is sent none, whatever this says. |
 
 Start with the defaults; raise `top_k` if answers miss context, and raise
 `max_images` (or set 0) for questions about graphs and diagrams.
-`/v1/retrieve` never calls a model, so it ignores `max_images`.
+`/v1/retrieve` never calls a model, so it takes only `query` and `top_k`.
 
 ### Choosing the model (`llm`)
 

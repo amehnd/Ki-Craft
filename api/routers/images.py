@@ -22,26 +22,20 @@ router = APIRouter(tags=["images"])
 
 @router.get(
     "/images/{record_id}/{position}",
-    summary="Fetch a figure",
+    summary="Get a figure",
     description=(
-        "Serves one figure listed in a chunk's ``image_urls``.\n\n"
-        "- ``record_id`` is the chunk's id in the vector store (``record_id`` "
-        "in the response).\n"
-        "- ``position`` is the figure's 0-based position within that chunk.\n\n"
-        "```\n"
-        "GET /v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0\n"
-        "```\n"
-        "The URL stays valid across restarts and servers, so responses may be "
-        "cached for a day. An unknown record or position returns 404."
+        "Returns one figure of a stored chunk, as listed in its `image_urls` or "
+        "in a query's `figures`. The URL is stable, and responses may be cached "
+        "for a day."
     ),
     response_class=FileResponse,
-    response_description="The figure's bytes (image/jpeg for the current store)",
-    responses={404: {"description": "Unknown record, or no figure at that position"}, **error_responses(503)},
+    response_description="The image file.",
+    responses={200: {"content": {"image/jpeg": {}}}, **error_responses(404, 503)},
 )
 async def serve_image(
     request: Request,
-    record_id: uuid.UUID,
-    position: Annotated[int, Path(ge=0)],
+    record_id: Annotated[uuid.UUID, Path(description="The chunk's `record_id`.")],
+    position: Annotated[int, Path(ge=0, description="0-based position of the figure in the chunk.")],
 ) -> FileResponse:
     """Serve one stored figure by record id and position.
 

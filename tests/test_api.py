@@ -567,3 +567,29 @@ def test_retrieve_does_not_take_an_llm(client):
     schemas = client.get("/openapi.json").json()["components"]["schemas"]
     assert "llm" not in schemas["RetrieveRequest"]["properties"]
     assert "llm" in schemas["QueryRequest"]["properties"]
+
+
+def test_retrieve_documents_only_the_fields_it_uses(client):
+    """max_images only matters when a model is called, so only query bodies list it."""
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    assert set(schemas["RetrieveRequest"]["properties"]) == {"query", "top_k"}
+    assert {"max_images", "llm"} <= set(schemas["QueryRequest"]["properties"])
+
+
+def test_every_route_and_error_is_described(client):
+    """Each operation has a summary and description, and each error a schema."""
+    spec = client.get("/openapi.json").json()
+    assert "base64" not in spec["info"]["description"], "responses carry figure URLs, not bytes"
+    assert {tag["name"] for tag in spec["tags"]} == {"query", "retrieval", "images", "system"}
+    for path, operations in spec["paths"].items():
+        for method, operation in operations.items():
+            assert operation.get("summary") and operation.get("description"), f"{method} {path}"
+            for code in ("404", "500", "502"):
+                if code in operation["responses"]:
+                    schema = operation["responses"][code]["content"]["application/json"]["schema"]
+                    assert schema == {"$ref": "#/components/schemas/ErrorResponse"}, f"{method} {path} {code}"
+            if "422" in operation["responses"]:
+                schema = operation["responses"]["422"]["content"]["application/json"]["schema"]
+                assert schema == {"$ref": "#/components/schemas/ValidationErrorResponse"}, f"{method} {path}"
+    issue = spec["components"]["schemas"]["ValidationIssue"]["properties"]
+    assert "input" not in issue, "the 422 handler strips the rejected value"

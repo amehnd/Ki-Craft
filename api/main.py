@@ -38,16 +38,34 @@ async def lifespan(app: FastAPI):
     yield
 
 
+_DESCRIPTION = """
+Answers questions about electronics documents (datasheets and application
+notes) from their text, tables and figures.
+
+A query retrieves the most relevant chunks of the indexed documents, then a
+model writes an answer from them. Each chunk carries its text, its tables as
+HTML and the URLs of its figures; figures are served by `GET /v1/images/...`.
+
+**Models.** Without an `llm` object the server's default model answers. With
+one, the answer comes from the provider and model you name, using your API key.
+
+**Errors.** Error responses have the body `{"detail": "..."}`. A failing model
+provider returns 502; an unavailable vector store returns 503.
+"""
+
+# Tag order and descriptions for the /docs sidebar.
+_TAGS = [
+    {"name": "query", "description": "Retrieve chunks and generate an answer."},
+    {"name": "retrieval", "description": "Retrieve chunks without generating an answer."},
+    {"name": "images", "description": "Figures of stored chunks."},
+    {"name": "system", "description": "Index and health check."},
+]
+
 app = FastAPI(
     title="Multimodal RAG API",
     version="0.2.0",
-    description=(
-        "Retrieve chunks and generate multimodal answers from a PDF-based "
-        "vector store.\n\n"
-        "Every chunk carries its OCR text, extracted tables (HTML) and figures "
-        "(inline base64 **and** fetchable image URLs). Try the example questions "
-        "like *\"Tell me about the pin configuration of the LM317.\"*"
-    ),
+    description=_DESCRIPTION,
+    openapi_tags=_TAGS,
     lifespan=lifespan,
 )
 

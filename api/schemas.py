@@ -15,81 +15,52 @@ from config.settings import GENERATION_MAX_IMAGES, RETRIEVAL_K
 
 
 class RetrieveRequest(BaseModel):
-    """A retrieval request: the question and how much context to fetch.
-
-    ``top_k`` overrides the default retrieval size for this call without
-    rebuilding the vector store.
-    """
+    """A question and how many chunks to retrieve for it."""
 
     query: str = Field(
         ...,
         min_length=1,
         max_length=2000,
-        description=(
-            "The user's question about the documents. The model retrieves the "
-            "most relevant chunks and answers using their text, tables and images."
-        ),
-        examples=[
-            "Tell me about the pin configuration of the LM317.",
-            "Tell me about the pin configuration of the LM2596.",
-        ],
+        description="The question to answer from the indexed documents.",
+        examples=["Tell me about the pin configuration of the LM317."],
     )
     top_k: int = Field(
         RETRIEVAL_K,
         ge=1,
         le=30,
         description=(
-            "How many chunks to retrieve. Every retrieved chunk's text and "
-            "tables are sent to the model, so this also sets the context size."
+            "Number of chunks to retrieve. For /v1/query every retrieved chunk's "
+            "text and tables go to the model, so this also sets the context size."
         ),
         examples=[RETRIEVAL_K],
-    )
-    max_images: int = Field(
-        GENERATION_MAX_IMAGES,
-        ge=0,
-        le=50,
-        description=(
-            "Most images to send to the model, taken in chunk order. "
-            "0 sends every retrieved image. Images cost far more tokens than "
-            "text, so this is the main cost control."
-        ),
-        examples=[GENERATION_MAX_IMAGES],
     )
 
 
 class LLMSettings(BaseModel):
-    """The model to answer with, and the caller's own key for it.
-
-    Sent as the optional ``llm`` object of a query. ``api_key`` is required:
-    without it a caller could run the server's own key against any model.
-    It is a ``SecretStr``, so printing, logging or dumping the request shows
-    ``**********``; only ``get_secret_value()`` returns the real key.
-    """
+    """The model that answers, and your API key for its provider."""
 
     provider: str = Field(
         ...,
-        description="Provider ID: 'gemini', 'groq', 'huggingface', or 'openai'",
+        description="Provider ID: `gemini`, `groq`, `huggingface` or `openai`.",
         examples=["gemini"],
     )
     model: str = Field(
         ...,
-        description="Model ID, as listed for that provider in config/providers.py",
+        description="Model ID from the server's catalogue for that provider.",
         examples=["gemini-3.5-flash-lite"],
     )
+    # Required, so a caller can never run the server's own key against a model
+    # of their choice. SecretStr prints as ********** in logs and dumps.
     api_key: SecretStr = Field(
         ...,
         min_length=1,
-        description="Your API key for the provider. Used for this request only; never stored, logged or traced.",
+        description="Your API key for the provider. Used for this request only; never stored or logged.",
     )
     temperature: float = Field(
         0.0,
         ge=0.0,
         le=2.0,
-        description=(
-            "Sampling temperature. Not sent to models that reject or ignore "
-            "it (Gemini 3.5 Flash-Lite and 3.6 Flash, OpenAI o-series and "
-            "GPT-5.4); they use the provider's default."
-        ),
+        description="Sampling temperature. Ignored by models with fixed sampling.",
         examples=[0.0],
     )
     max_tokens: int | None = Field(
@@ -97,61 +68,75 @@ class LLMSettings(BaseModel):
         ge=1,
         le=8192,
         description=(
-            "Maximum output tokens, including any tokens the model spends "
-            "reasoning. Leave out to use the model's default from the "
-            "catalogue: 512, or 2048 for models that reason by default "
-            "(Groq GPT-OSS, OpenAI o-series and GPT-5.4, some Gemini models)."
+            "Maximum output tokens, reasoning included. Defaults to the model's "
+            "catalogue value: 512, or 2048 for models that reason by default."
         ),
         examples=[512],
     )
 
 
 class QueryRequest(RetrieveRequest):
-    """A retrieval plus generation request.
+    """A question to answer, with optional figure limit and model choice."""
 
-    Without ``llm`` the server's default model answers with the server's key.
-    """
-
+    max_images: int = Field(
+        GENERATION_MAX_IMAGES,
+        ge=0,
+        le=50,
+        description=(
+            "Maximum figures sent to the model, taken in chunk order; 0 sends all. "
+            "Figures cost far more tokens than text. Text-only models get none."
+        ),
+        examples=[GENERATION_MAX_IMAGES],
+    )
     llm: LLMSettings | None = Field(
         None,
-        description=(
-            "Answer with this provider and model, using your own API key. "
-            "Leave out to use the server's default model."
-        ),
+        description="Answer with this provider and model using your own key. Omit to use the server's default model.",
     )
 
 
-# ---------------------------------------------------------------------------
-# Response models
-# ---------------------------------------------------------------------------
+class ValidationIssue(BaseModel):
+    """One reason a request was rejected."""
+
+    type: str = Field(..., description="Error type.", examples=["missing"])
+    loc: list[str | int] = Field(..., description="Where the problem is.", examples=[["body", "llm", "api_key"]])
+    msg: str = Field(..., description="What is wrong.", examples=["Field required"])
+    ctx: dict[str, Any] | None = Field(None, description="Extra detail for some error types.")
+
+
+class ValidationErrorResponse(BaseModel):
+    """The body of a 422 response. The rejected value is never echoed back."""
+
+    detail: list[ValidationIssue]
+
+
+class ErrorResponse(BaseModel):
+    """The body of an error response. A 422 has its own schema."""
+
+    detail: str = Field(..., description="What went wrong.", examples=["The model provider failed: quota exceeded"])
+
+
 class ChunkPayload(BaseModel):
-    """One retrieved chunk with its full multimodal content.
+    """One retrieved chunk: its summary, original text, tables and figure URLs."""
 
-    Figures are not inline: ``image_urls`` lists one stable URL per figure,
-    ``/v1/images/{record_id}/{position}``, built from the chunk's Chroma
-    record id and the figure's 0-based position within the chunk.
-    ``image_count`` counts those URLs.
-    """
-
-    chunk_id: int = Field(..., description="1-based position in this response")
+    chunk_id: int = Field(..., description="1-based position of the chunk in this response.")
     record_id: str | None = Field(
         None,
-        description="The chunk's id in the vector store; stable, and part of its image URLs",
+        description="Stable ID of the chunk in the store; part of its figure URLs.",
     )
     enhanced_content: str = Field(
-        ..., description="AI-enhanced searchable summary of the chunk"
+        ..., description="Summary written at ingestion; the text that is searched."
     )
-    raw_text: str = Field("", description="Original OCR text extracted from the PDF")
-    tables_html: list[str] = Field(default_factory=list, description="HTML table markup")
-    image_count: int = Field(0, description="Number of figures in image_urls")
+    raw_text: str = Field("", description="Text extracted from the PDF.")
+    tables_html: list[str] = Field(default_factory=list, description="Each table as an HTML `<table>` string.")
+    image_count: int = Field(0, description="Number of entries in `image_urls`.")
     image_urls: list[str] = Field(
         default_factory=list,
-        description="Stable URL of each figure, /v1/images/{record_id}/{position}",
+        description="Relative URL of each figure, `/v1/images/{record_id}/{position}`.",
     )
-    has_table: bool = False
-    has_image: bool = False
-    source: str | None = Field(None, description="Source document, if known")
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    has_table: bool = Field(False, description="Whether the chunk has tables.")
+    has_image: bool = Field(False, description="Whether the chunk has figures.")
+    source: str | None = Field(None, description="Name of the source document.")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Other stored fields of the chunk.")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -188,13 +173,13 @@ class ChunkPayload(BaseModel):
 
 
 class RetrieveResponse(BaseModel):
-    """Result of a retrieve-only request (no answer generation)."""
+    """The chunks retrieved for a question."""
 
-    query: str
-    num_chunks: int = Field(..., description="Number of chunks returned")
-    total_images: int = Field(..., description="Figures (image URLs) across all chunks")
-    total_tables: int = Field(..., description="Tables across all chunks")
-    chunks: list[ChunkPayload] = Field(default_factory=list)
+    query: str = Field(..., description="The question, as received.")
+    num_chunks: int = Field(..., description="Number of chunks returned.")
+    total_images: int = Field(..., description="Figures across all chunks.")
+    total_tables: int = Field(..., description="Tables across all chunks.")
+    chunks: list[ChunkPayload] = Field(default_factory=list, description="The chunks, most relevant first.")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -227,37 +212,35 @@ class RetrieveResponse(BaseModel):
 
 
 class UsageMetadata(BaseModel):
-    """Token usage and generation stats for a single LLM call.
+    """Token counts and timing of the model call.
 
-    ``input_tokens``/``output_tokens`` come straight from the provider's usage
-    metadata (Gemini reports them on the final response/stream chunk).
-    ``estimated_cost_usd`` is derived from per-1M-token pricing in
-    ``config.settings`` and is ``None`` when pricing is disabled.
+    Token counts are as the provider reports them. The cost estimate uses
+    the server's configured prices and is null when none are set.
     """
 
-    model: str = Field(..., description="Model used for generation")
-    input_tokens: int = Field(0, description="Prompt (input) tokens sent to the model")
-    output_tokens: int = Field(0, description="Tokens generated by the model")
-    total_tokens: int = Field(0, description="input_tokens + output_tokens")
-    latency_ms: float | None = Field(None, description="Generation wall time in milliseconds")
-    prompt_chars: int = Field(0, description="Length of the text prompt in characters")
-    prompt_images: int = Field(0, description="Number of images attached to the prompt")
-    chunks_used: int = Field(0, description="Number of retrieved chunks sent to the model")
+    model: str = Field(..., description="Model ID that answered.")
+    input_tokens: int = Field(0, description="Input tokens, as reported by the provider.")
+    output_tokens: int = Field(0, description="Output tokens, reasoning included.")
+    total_tokens: int = Field(0, description="Input plus output tokens.")
+    latency_ms: float | None = Field(None, description="Time spent generating, in milliseconds.")
+    prompt_chars: int = Field(0, description="Characters of text in the prompt.")
+    prompt_images: int = Field(0, description="Figures sent in the prompt.")
+    chunks_used: int = Field(0, description="Chunks sent in the prompt.")
     estimated_cost_usd: float | None = Field(
-        None, description="Estimated generation cost in USD, when pricing is configured"
+        None, description="Estimated cost in USD; null when no prices are configured."
     )
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "model": "gemini-2.5-flash-lite",
+                "model": "gemini-3.5-flash-lite",
                 "input_tokens": 1024,
                 "output_tokens": 256,
                 "total_tokens": 1280,
                 "latency_ms": 1840.5,
                 "prompt_chars": 8200,
-                "prompt_images": 4,
-                "chunks_used": 5,
+                "prompt_images": 1,
+                "chunks_used": 2,
                 "estimated_cost_usd": 0.0002,
             }
         }
@@ -265,57 +248,45 @@ class UsageMetadata(BaseModel):
 
 
 class FigurePayload(BaseModel):
-    """One figure the model saw, labelled as the prompt labels it.
+    """A figure sent to the model. The answer cites it by label, as `[F1]`."""
 
-    An answer cites a figure by its label in square brackets, like ``[F1]``.
-    """
-
-    label: str = Field(..., description="The figure's label in the prompt: F1, F2, ...", examples=["F1"])
+    label: str = Field(..., description="Label in the prompt: `F1`, `F2`, ...", examples=["F1"])
     url: str = Field(
         ...,
-        description="Stable URL of the figure, /v1/images/{record_id}/{position}",
+        description="Relative URL of the figure, `/v1/images/{record_id}/{position}`.",
         examples=["/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0"],
     )
-    chunk_id: int = Field(..., description="The chunk_id of its chunk in this response", examples=[1])
-    source: str = Field(..., description="Source document of the figure", examples=["lm317"])
+    chunk_id: int = Field(..., description="`chunk_id` of its chunk in this response.", examples=[1])
+    source: str = Field(..., description="Name of the source document.", examples=["lm317"])
 
 
 class QueryResponse(RetrieveResponse):
-    """Result of a full query: retrieved chunks plus the generated answer."""
+    """The retrieved chunks, the generated answer and the figures it drew on."""
 
-    answer: str = Field(..., description="The LLM-generated answer")
-    answer_characters: int = Field(..., description="Length of the answer in characters")
+    answer: str = Field(..., description="The generated answer.")
+    answer_characters: int = Field(..., description="Length of the answer in characters.")
     figures: list[FigurePayload] = Field(
         default_factory=list,
-        description=(
-            "The figures sent to the model, in prompt order, capped by max_images. "
-            "Empty for a text-only model."
-        ),
+        description="Figures sent to the model, in prompt order. Empty for a text-only model.",
     )
-    usage: "UsageMetadata | None" = Field(
-        None,
-        description=(
-            "Token usage and generation stats from the LLM call, when the "
-            "provider reported them."
-        ),
-    )
+    usage: "UsageMetadata | None" = Field(None, description="Token counts and timing of the model call.")
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "query": "Tell me about the pin configuration of the LM317.",
                 "num_chunks": 2,
-                "total_images": 2,
+                "total_images": 1,
                 "total_tables": 1,
                 "answer": (
                     "The LM317 is an adjustable linear voltage regulator with "
-                    "three pins. Pin 1 is the adjust (ADJ) pin, used to set the "
+                    "three pins [F1]. Pin 1 is the adjust (ADJ) pin, used to set the "
                     "output voltage with a resistor divider. Pin 2 is the "
                     "regulated output (VOUT), and pin 3 is the unregulated input "
                     "(VIN). The output voltage is approximately 1.25 V times "
                     "(1 + R2/R1)."
                 ),
-                "answer_characters": 340,
+                "answer_characters": 302,
                 "figures": [
                     {
                         "label": "F1",
@@ -325,14 +296,14 @@ class QueryResponse(RetrieveResponse):
                     }
                 ],
                 "usage": {
-                    "model": "gemini-2.5-flash-lite",
+                    "model": "gemini-3.5-flash-lite",
                     "input_tokens": 1024,
                     "output_tokens": 256,
                     "total_tokens": 1280,
                     "latency_ms": 1840.5,
                     "prompt_chars": 8200,
-                    "prompt_images": 4,
-                    "chunks_used": 5,
+                    "prompt_images": 1,
+                    "chunks_used": 2,
                     "estimated_cost_usd": 0.0002,
                 },
                 "chunks": [],

@@ -20,18 +20,14 @@ from fastapi.responses import StreamingResponse
 from langchain_core.language_models.chat_models import BaseChatModel
 from starlette.concurrency import iterate_in_threadpool, run_in_threadpool
 
-from api.openapi_examples import (
-    QUERY_BODY_EXAMPLES,
-    RICH_DESCRIPTION_COMMON,
-    error_responses,
-)
+from api.openapi_examples import QUERY_BODY_EXAMPLES, error_responses
 from api.schemas import LLMSettings, QueryRequest, QueryResponse
 from api.service import RAGService
 from src.llm import LLMProviderError, UnknownModelError, create_llm
 from src.logger import get_logger
 
 logger = get_logger(__name__)
-router = APIRouter(tags=["generation"])
+router = APIRouter(tags=["query"])
 
 
 def _requested_llm(llm: LLMSettings | None) -> BaseChatModel | None:
@@ -53,26 +49,18 @@ def _requested_llm(llm: LLMSettings | None) -> BaseChatModel | None:
 @router.post(
     "/query",
     response_model=QueryResponse,
-    summary="Retrieve chunks and generate an answer",
+    summary="Answer a question",
     description=(
-        "Everything /v1/retrieve returns, plus a complete answer generated "
-        "from the retrieved chunks, and ``figures``: the figures sent to the "
-        "model, labelled F1, F2, ... as the answer cites them ([F1]).\n\n"
-        "Without ``llm`` the server's default model answers. With ``llm`` the "
-        "answer comes from that provider and model, using the API key you "
-        "send:\n\n"
-        "- ``provider``: one of ``gemini``, ``groq``, ``huggingface``, ``openai``\n"
-        "- ``model``: a model ID listed for that provider\n"
-        "- ``api_key``: your key for the provider (required whenever ``llm`` is sent)\n"
-        "- ``temperature``, ``max_tokens``: optional\n\n"
-        "Pick a ready-made body from the Examples list below.\n\n"
-        "A provider or model that is not in the catalogue is rejected with 422 "
-        "before retrieval runs. A failing provider (bad key, quota, timeout) "
-        "returns 502 with the provider's message. Answers are grounded in the "
-        "retrieved chunks; no web search is used."
-    )
-    + RICH_DESCRIPTION_COMMON,
-    response_description="Retrieved chunks plus the generated answer",
+        "Retrieves the `top_k` most relevant chunks and returns them with an "
+        "answer written from their text, tables and up to `max_images` figures.\n\n"
+        "`figures` lists the figures sent to the model, labelled `F1`, `F2`, ...; "
+        "the answer cites them in square brackets, as `[F1]`.\n\n"
+        "Without `llm` the server's default model answers. With `llm` the given "
+        "provider and model answer using your `api_key`. A provider or model "
+        "not in the server's catalogue returns 422; a provider failure (bad key, "
+        "quota, timeout, empty answer) returns 502."
+    ),
+    response_description="The retrieved chunks, the answer and the figures it drew on.",
     responses=error_responses(502, 503),
 )
 async def query(
@@ -157,20 +145,21 @@ def _stream_frames(
 @router.post(
     "/query/stream",
     response_class=StreamingResponse,
-    summary="Stream an answer over SSE",
+    summary="Answer a question, streamed",
     description=(
-        "Takes the same JSON body as POST /v1/query, including an optional ``llm``. "
-        "Once the first answer fragment is ready, the event flow is:\n\n"
-        "1. ``event: retrieval`` - full chunk payloads (like /v1/retrieve),\n"
-        "2. ``event: token``    - one per answer fragment (field ``delta``),\n"
-        "3. ``event: done``     - final answer, chunk count, the figures the "
-        "model saw and usage,\n"
-        "4. ``event: error``    - replaces ``done`` on mid-stream failure "
-        "(``status`` and ``message``).\n\n"
-        "A provider failure before the first fragment returns HTTP 502. "
-        "Read the stream with browser fetch or curl -N."
+        "Same request body as `POST /v1/query`. The answer arrives as "
+        "Server-Sent Events:\n\n"
+        "| Event | Data |\n"
+        "|---|---|\n"
+        "| `retrieval` | The retrieved chunks, as `POST /v1/retrieve` returns them |\n"
+        "| `token` | `{\"delta\": \"...\"}`, one per answer fragment |\n"
+        "| `done` | `answer`, `answer_characters`, `num_chunks`, `figures`, `usage` |\n"
+        "| `error` | `{\"status\": 502, \"message\": \"...\"}`, in place of `done` |\n\n"
+        "Errors before the first fragment are ordinary HTTP errors (422, 502, 503). "
+        "Errors after it end the stream with an `error` event. Swagger UI shows "
+        "the stream only once it ends; use `curl -N` or `fetch` to read it live."
     ),
-    response_description="text/event-stream of retrieval + answer tokens",
+    response_description="A `text/event-stream` of the events above.",
     responses={200: {"content": {"text/event-stream": {}}}, **error_responses(500, 502, 503)},
 )
 async def query_stream(

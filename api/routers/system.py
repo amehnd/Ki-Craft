@@ -11,10 +11,10 @@ from fastapi.responses import JSONResponse
 
 from api.service import StoreUnavailableError
 
-router = APIRouter(tags=["meta"])
+router = APIRouter(tags=["system"])
 
 
-@router.get("/", summary="List endpoints")
+@router.get("/", summary="List endpoints", description="Returns the API name, version and its endpoints.")
 def root(request: Request) -> dict:
     """Human-readable index of what this API exposes."""
     return {
@@ -33,9 +33,13 @@ def root(request: Request) -> dict:
 
 @router.get(
     "/health",
-    summary="Service health",
-    response_description="The vector store is loaded",
-    responses={503: {"description": "The vector store could not be loaded"}},
+    summary="Health check",
+    description=(
+        "Returns 200 when the vector store is loaded and 503 when it cannot be. "
+        "The first call may take a few seconds while the store loads."
+    ),
+    response_description="The service is ready.",
+    responses={503: {"description": "The vector store could not be loaded."}},
 )
 async def health(request: Request):
     """Report whether the vector store is loadable in this runtime.

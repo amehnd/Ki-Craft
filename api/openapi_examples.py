@@ -6,6 +6,8 @@ is handled; it only shapes the OpenAPI schema FastAPI generates.
 
 from __future__ import annotations
 
+from api.schemas import ErrorResponse, ValidationErrorResponse
+
 # Named examples for request bodies, in the shape FastAPI's
 # ``Body(openapi_examples=...)`` expects: each key is one entry in the
 # Examples dropdown on /docs, ``summary`` is its label, ``description`` the
@@ -15,7 +17,7 @@ _LM2596 = "Tell me about the pin configuration of the LM2596."
 
 RETRIEVE_BODY_EXAMPLES = {
     "lm2596_pins": {
-        "summary": "LM2596 pin configuration",
+        "summary": "LM2596 pins, 5 chunks",
         "value": {"query": _LM2596, "top_k": 5},
     },
     "lm317_pins": {
@@ -26,24 +28,18 @@ RETRIEVE_BODY_EXAMPLES = {
 
 QUERY_BODY_EXAMPLES = {
     "default_model": {
-        "summary": "Server's default model (no llm)",
-        "description": (
-            "Leave out ``llm`` and the server's default model (Gemini 3.5 "
-            "Flash-Lite) answers with the server's key. This is how /v1/query "
-            "behaved before the ``llm`` object existed."
-        ),
+        "summary": "Default model (Gemini 3.5 Flash-Lite)",
+        "description": "Without `llm`, the server's default model answers using the server's key.",
         "value": {"query": _LM2596, "top_k": 5, "max_images": 3},
     },
     "default_model_every_image": {
-        "summary": "Server's default model, 10 chunks and every image",
-        "description": "``max_images`` 0 sends every retrieved figure, which costs far more tokens.",
+        "summary": "Default model, 10 chunks, every figure",
+        "description": "`max_images` 0 sends every retrieved figure, which costs far more tokens.",
         "value": {"query": "Tell me about the pin configuration of the LM317.", "top_k": 10, "max_images": 0},
     },
     "gemini": {
-        "summary": "Gemini 3.5 Flash-Lite with your key",
-        "description": (
-            "This model uses fixed sampling, so ``temperature`` is not sent to it."
-        ),
+        "summary": "Gemini 3.5 Flash-Lite, your key",
+        "description": "This model uses fixed sampling, so `temperature` is ignored.",
         "value": {
             "query": _LM2596,
             "top_k": 5,
@@ -58,12 +54,11 @@ QUERY_BODY_EXAMPLES = {
         },
     },
     "groq_gpt_oss": {
-        "summary": "Groq GPT-OSS 120B",
+        "summary": "Groq GPT-OSS 120B, your key",
         "description": (
-            "A text-only model: it gets the chunks' text and tables, no figures, "
-            "whatever ``max_images`` says. It reasons before answering, and the "
-            "reasoning counts against ``max_tokens``, so its default is 2048; a "
-            "budget that runs out before any answer text returns 502."
+            "Text-only: no figures are sent. It reasons before answering, and the "
+            "reasoning counts against `max_tokens`; if the budget runs out before "
+            "any answer text, the response is 502."
         ),
         "value": {
             "query": _LM2596,
@@ -79,8 +74,8 @@ QUERY_BODY_EXAMPLES = {
         },
     },
     "openai_gpt_4o_mini": {
-        "summary": "OpenAI GPT-4o mini",
-        "description": "Reads images, so up to ``max_images`` figures are sent.",
+        "summary": "OpenAI GPT-4o mini, your key",
+        "description": "Reads images, so up to `max_images` figures are sent.",
         "value": {
             "query": _LM2596,
             "top_k": 5,
@@ -95,8 +90,8 @@ QUERY_BODY_EXAMPLES = {
         },
     },
     "huggingface_llama": {
-        "summary": "Hugging Face router, Llama 3.3 70B",
-        "description": "A text-only model: no figures are sent. The key is a Hugging Face token.",
+        "summary": "Hugging Face Llama 3.3 70B, your token",
+        "description": "Text-only: no figures are sent. The key is a Hugging Face token.",
         "value": {
             "query": _LM2596,
             "top_k": 5,
@@ -112,41 +107,20 @@ QUERY_BODY_EXAMPLES = {
     },
 }
 
-RICH_DESCRIPTION_COMMON = """
-Ask a question about the indexed PDFs. The service:
-
-1. embeds the question with the same model used at ingest time,
-2. retrieves the `top_k` most relevant chunks from Chroma,
-3. (for `/v1/query` and `/v1/query/stream`) asks the multimodal LLM to answer
-   using the chunk text, tables and figures.
-
-### Try it
-
-```json
-{
-  "query": "Tell me about the pin configuration of the LM317.",
-  "top_k": 5
-}
-```
-
-### Response
-
-Every chunk carries its `record_id`, and each of its figures can be loaded
-over HTTP at a stable URL, `GET /v1/images/{record_id}/{position}`.
-"""
-
-
-
 def error_responses(*codes: int) -> dict[int, dict]:
     """Describe a route's error status codes for ``/docs``.
 
-    Every error body has one shape, ``{"detail": "..."}``; the handlers that
-    produce them are in ``api/main.py``. 422 is not listed: FastAPI already
-    documents it, with its schema, on every route that takes a body.
+    Every error body is ``ErrorResponse``, ``{"detail": "..."}``, except 422,
+    whose body is ``ValidationErrorResponse``; the handlers that produce them
+    are in ``api/main.py``. Every route that takes input gets 422, replacing
+    FastAPI's default schema, which lists an ``input`` field this API strips.
     """
     descriptions = {
-        500: "Unexpected server error; details are in the server log",
-        502: "The model provider failed, or returned no answer text",
-        503: "The vector store could not be loaded",
+        404: "No figure at that record and position.",
+        500: "Unexpected server error. Details are in the server log.",
+        502: "The model provider failed, or returned no answer text.",
+        503: "The vector store could not be loaded.",
     }
-    return {code: {"description": descriptions[code]} for code in codes}
+    responses = {code: {"model": ErrorResponse, "description": descriptions[code]} for code in codes}
+    responses[422] = {"model": ValidationErrorResponse, "description": "The request is invalid."}
+    return responses
