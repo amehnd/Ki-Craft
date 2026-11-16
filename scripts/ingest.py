@@ -7,7 +7,9 @@ is skipped, so an interrupted batch can be re-run with the same command.
 
 A ``.json`` export goes through :func:`src.ingestion.pipeline.store_export`:
 its summaries are embedded as they are, with no summary model. It is skipped
-if the store already holds that document.
+if the store already holds that document, unless ``--replace`` is given: then
+the document's old records and figure files are replaced, after the new
+summaries have been embedded.
 
 A file that fails is logged and the batch moves on; nothing of it is stored.
 
@@ -16,6 +18,7 @@ Usage:
     python -m scripts.ingest data/ --backend local
     python -m scripts.ingest data/ne555.pdf --backend local --store /tmp/store --images /tmp/images --exports /tmp/json
     python -m scripts.ingest json/ne555.json
+    python -m scripts.ingest json/lm317.json json/AN699.json --replace
 
 The summary backend's tunables (timeout, retries, max tokens, image limits)
 are environment variables; see the enhancement settings in config/settings.py.
@@ -63,6 +66,8 @@ def main() -> int:
     parser.add_argument("--store", default=CHROMA_PERSIST_DIR, help="Chroma folder (default: %(default)s)")
     parser.add_argument("--images", default=IMAGES_DIR, help="figure files folder (default: %(default)s)")
     parser.add_argument("--exports", default=JSON_EXPORT_DIR, help="chunk exports folder (default: %(default)s)")
+    parser.add_argument("--replace", action="store_true",
+                        help="for .json exports: replace a document the store already holds")
     args = parser.parse_args()
 
     inputs = _inputs(args.paths)
@@ -76,7 +81,7 @@ def main() -> int:
         t0 = time.monotonic()
         try:
             if pdf.suffix.lower() == ".json":
-                store_export(pdf, args.store, args.images)
+                store_export(pdf, args.store, args.images, replace=args.replace)
             else:
                 run_complete_ingestion_pipeline(pdf, args.store, args.images, args.exports, args.backend)
         except FileExistsError as exc:

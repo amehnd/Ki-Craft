@@ -110,42 +110,104 @@ def test_pipeline_writes_export_figures_and_records(tmp_path, monkeypatch):
     assert (tmp_path / "img" / "ne555_c2_img0.jpg").read_bytes() == JPEG
 
 
-class _FakeStore:
-    """Stands in for Chroma: ``get`` by source and ``add_documents``."""
+class _Embedder:
+    """An offline embedder for a temporary Chroma store; can be told to fail."""
 
-    def __init__(self, sources: set[str]):
-        self.sources = sources
-        self.added: list = []
+    def __init__(self, fail: bool = False):
+        self.fail = fail
+        self.calls = 0
 
-    def get(self, where: dict, limit: int) -> dict:
-        return {"ids": ["x"] if where["source"] in self.sources else []}
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        self.calls += 1
+        if self.fail:
+            raise RuntimeError("embedding service down")
+        return [[float(len(text)), 1.0, 0.0] for text in texts]
 
-    def add_documents(self, documents: list) -> None:
-        self.added.extend(documents)
+    def embed_query(self, text: str) -> list[float]:
+        return [float(len(text)), 1.0, 0.0]
 
 
-def _patch_store(monkeypatch, store: _FakeStore) -> None:
-    monkeypatch.setattr(pipeline, "load_embedding_model", lambda: "fake-embeddings")
-    monkeypatch.setattr(pipeline, "Chroma", lambda **kwargs: store)
+def _store(tmp_path, monkeypatch, embedder: _Embedder | None = None) -> _Embedder:
+    """Point store_export at a temporary Chroma store and an offline embedder."""
+    embedder = embedder or _Embedder()
+    monkeypatch.setattr(pipeline, "load_embedding_model", lambda: embedder)
+    (tmp_path / "ne555.json").write_text(json.dumps(_export()))
+    return embedder
+
+
+def _records(tmp_path) -> dict:
+    from langchain_chroma import Chroma
+
+    db = Chroma(persist_directory=str(tmp_path / "store"), embedding_function=_Embedder())
+    found = db.get(include=["metadatas", "documents", "embeddings"])
+    return {"ids": found["ids"], "sources": sorted(m["source"] for m in found["metadatas"]),
+            "documents": sorted(found["documents"]), "embeddings": found["embeddings"]}
+
+
+def _put(tmp_path, monkeypatch, replace: bool = False, embedder: _Embedder | None = None):
+    _store(tmp_path, monkeypatch, embedder)
+    return pipeline.store_export(tmp_path / "ne555.json", str(tmp_path / "store"), tmp_path / "img", replace=replace)
 
 
 def test_store_export_adds_its_records_without_summarising(tmp_path, monkeypatch):
-    (tmp_path / "ne555.json").write_text(json.dumps(_export()))
-    store = _FakeStore(sources={"lm317"})
-    _patch_store(monkeypatch, store)
     monkeypatch.setattr(pipeline, "summarise_chunks", lambda *a: pytest.fail("no summarising"))
-
-    pipeline.store_export(tmp_path / "ne555.json", "store", tmp_path / "img")
-    assert [d.metadata["source"] for d in store.added] == ["ne555", "ne555"]
+    embedder = _Embedder()
+    _put(tmp_path, monkeypatch, embedder=embedder)
+    records = _records(tmp_path)
+    assert records["sources"] == ["ne555", "ne555"]
+    assert records["documents"] == ["summary one", "summary two"]
+    assert [list(v) for v in records["embeddings"]] == [pytest.approx([11.0, 1.0, 0.0])] * 2
+    assert embedder.calls == 1, "every summary is embedded once"
     assert (tmp_path / "img" / "ne555_c2_img0.jpg").read_bytes() == JPEG
 
 
 def test_store_export_refuses_a_document_already_stored(tmp_path, monkeypatch):
-    (tmp_path / "ne555.json").write_text(json.dumps(_export()))
-    store = _FakeStore(sources={"ne555"})
-    _patch_store(monkeypatch, store)
+    _put(tmp_path, monkeypatch)
+    before = _records(tmp_path)["ids"]
+    with pytest.raises(FileExistsError, match="--replace"):
+        _put(tmp_path, monkeypatch)
+    assert _records(tmp_path)["ids"] == before
 
-    with pytest.raises(FileExistsError):
-        pipeline.store_export(tmp_path / "ne555.json", "store", tmp_path / "img")
-    assert store.added == []
-    assert not (tmp_path / "img").exists(), "no figure is written either"
+
+def test_replace_swaps_the_records_and_removes_stale_figures(tmp_path, monkeypatch):
+    _put(tmp_path, monkeypatch)
+    old_ids = set(_records(tmp_path)["ids"])
+    (tmp_path / "img" / "ne555_c9_img0.jpg").write_bytes(b"old figure of a chunk that no longer exists")
+    (tmp_path / "img" / "lm555_c1_img0.jpg").write_bytes(b"another document")
+
+    _put(tmp_path, monkeypatch, replace=True)
+    records = _records(tmp_path)
+    assert records["sources"] == ["ne555", "ne555"]
+    assert not old_ids & set(records["ids"])
+    assert not (tmp_path / "img" / "ne555_c9_img0.jpg").exists()
+    assert (tmp_path / "img" / "ne555_c2_img0.jpg").read_bytes() == JPEG
+    assert (tmp_path / "img" / "lm555_c1_img0.jpg").exists(), "other documents are untouched"
+
+
+def test_failed_embedding_leaves_the_stored_document_as_it_was(tmp_path, monkeypatch):
+    """Embedding runs before anything is deleted."""
+    _put(tmp_path, monkeypatch)
+    before = _records(tmp_path)["ids"]
+    with pytest.raises(RuntimeError, match="embedding service down"):
+        _put(tmp_path, monkeypatch, replace=True, embedder=_Embedder(fail=True))
+    assert _records(tmp_path)["ids"] == before
+    assert (tmp_path / "img" / "ne555_c2_img0.jpg").exists()
+
+
+@pytest.mark.parametrize(
+    "broken, message",
+    [
+        (lambda e: e[1].update(chunk_id=5), "chunk ids"),
+        (lambda e: e[0].update(enhanced_content=" "), "no summary"),
+        (lambda e: e[1]["metadata"]["original_content"].update(images_base64=["not base64!"]), "does not decode"),
+    ],
+)
+def test_a_broken_export_is_rejected_before_any_change(tmp_path, monkeypatch, broken, message):
+    export = _export()
+    broken(export)
+    embedder = _store(tmp_path, monkeypatch)
+    (tmp_path / "ne555.json").write_text(json.dumps(export))
+    with pytest.raises(ValueError, match=message):
+        pipeline.store_export(tmp_path / "ne555.json", str(tmp_path / "store"), tmp_path / "img")
+    assert embedder.calls == 0
+    assert not (tmp_path / "img").exists()

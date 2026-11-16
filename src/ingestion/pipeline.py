@@ -13,7 +13,9 @@ LangChain ``Document`` per chunk with flat metadata: ``source``, ``chunk_id``,
 from __future__ import annotations
 
 import base64
+import binascii
 import json
+import uuid
 from pathlib import Path
 
 from langchain_chroma import Chroma
@@ -109,39 +111,86 @@ def create_vector_store(
     )
 
 
+def _check_export(export: list, source: str) -> None:
+    """Raise ValueError unless ``export`` is safe to store: ids in order, summaries, figures."""
+    if not isinstance(export, list) or not export:
+        raise ValueError(f"{source}: the export holds no chunks")
+    if [chunk.get("chunk_id") for chunk in export] != list(range(1, len(export) + 1)):
+        raise ValueError(f"{source}: chunk ids are not 1..{len(export)} in order")
+    for chunk in export:
+        if not str(chunk.get("enhanced_content") or "").strip():
+            raise ValueError(f"{source}: chunk {chunk['chunk_id']} has no summary")
+        for b64 in chunk["metadata"]["original_content"].get("images_base64", []):
+            try:
+                base64.b64decode(b64, validate=True)
+            except binascii.Error as exc:
+                raise ValueError(f"{source}: chunk {chunk['chunk_id']} has a figure that does not decode") from exc
+
+
 @traceable(run_type="chain", name="StoreExport")
 def store_export(
     export_path: str | Path,
     persist_directory: str = CHROMA_PERSIST_DIR,
     images_dir: str | Path = IMAGES_DIR,
+    replace: bool = False,
 ) -> Chroma:
     """Add one chunk export to the store: write its figures, embed its summaries.
 
-    The document's name (``source``) is the export's file name without ``.json``.
+    The document's name (``source``) is the export's file name without
+    ``.json``. The steps run in an order that keeps the store whole if one
+    fails: the export is checked, every summary is embedded (the network
+    call), and only then are the document's old records and figure files
+    removed (with ``replace``) and the new ones written.
 
     Args:
         export_path: A ``<source>.json`` export, as :func:`export_chunks_to_json` writes it.
         persist_directory: Folder of the Chroma store.
         images_dir: Folder the figure files are written to.
+        replace: Replace the document's records and figures if the store
+            already holds it.
 
     Returns:
         The Chroma store holding the new records.
 
     Raises:
-        FileExistsError: If the store already holds records for ``source``;
-            nothing is written then.
+        ValueError: If the export is empty, its chunk ids are out of order, a
+            summary is empty or a figure does not decode; nothing is changed.
+        FileExistsError: If the store already holds ``source`` and ``replace``
+            is false; nothing is changed.
     """
     source = Path(export_path).stem
+    export = json.loads(Path(export_path).read_text(encoding="utf-8"))
+    _check_export(export, source)
+
+    embedding = load_embedding_model()
     db = Chroma(
         persist_directory=persist_directory,
-        embedding_function=load_embedding_model(),
+        embedding_function=embedding,
         collection_metadata=CHROMA_COLLECTION_METADATA,
     )
-    if db.get(where={"source": source}, limit=1)["ids"]:
-        raise FileExistsError(f"{persist_directory} already holds records for {source}")
-    export = json.loads(Path(export_path).read_text(encoding="utf-8"))
-    db.add_documents(documents_from_export(export, source, images_dir))
-    logger.info("Stored %d chunks from %s", len(export), export_path)
+    old_ids = db.get(where={"source": source}, include=[])["ids"]
+    if old_ids and not replace:
+        raise FileExistsError(f"{persist_directory} already holds {source}; pass --replace to replace it")
+
+    vectors = embedding.embed_documents([chunk["enhanced_content"] for chunk in export])
+
+    if old_ids:
+        db.delete(ids=old_ids)
+        stale = list(Path(images_dir).glob(f"{source}_c*_img*.jpg"))
+        for path in stale:
+            path.unlink()
+        logger.info("Removed %d records and %d figure files of %s", len(old_ids), len(stale), source)
+
+    documents = documents_from_export(export, source, images_dir)
+    # The collection's own add takes the vectors computed above; LangChain's
+    # add_documents would embed every summary a second time.
+    db._collection.add(
+        ids=[str(uuid.uuid4()) for _ in documents],
+        embeddings=vectors,
+        documents=[document.page_content for document in documents],
+        metadatas=[document.metadata for document in documents],
+    )
+    logger.info("Stored %d chunks from %s", len(documents), export_path)
     return db
 
 
