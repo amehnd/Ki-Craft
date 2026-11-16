@@ -13,6 +13,7 @@ import base64
 import time
 from collections.abc import Generator, Iterator, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from langchain_core.documents import Document
@@ -30,7 +31,7 @@ from config.settings import (
     GENERATION_PROVIDER,
     GENERATION_TEMPERATURE,
 )
-from src.documents import chunk_text_and_tables, extract_original_data
+from src.documents import chunk_text_and_tables, image_file, stored_image_paths
 from src.llm import LLMProviderError, create_llm
 from src.logger import get_logger
 from src.retrieval.search import retrieve_chunks
@@ -53,7 +54,8 @@ class PromptFigure:
         position: 0-based index into that chunk's stored figures.
         record_id: The chunk's store record id, or None if it has none.
         source: The chunk's document name.
-        base64: The image bytes, base64-encoded.
+        path: The figure file, inside ``IMAGES_DIR``. Its bytes are read only
+            for the model request and the trace attachment.
     """
 
     label: str
@@ -61,7 +63,7 @@ class PromptFigure:
     position: int
     record_id: str | None
     source: str
-    base64: str
+    path: Path
 
 
 def _capture_usage(obj: Any, usage: dict[str, Any]) -> None:
@@ -172,7 +174,8 @@ def _build_text_prompt(chunks: list[Document], query: str, with_images: bool = T
 def select_figures(chunks: list[Document], max_images: int) -> list[PromptFigure]:
     """Choose the figures to send to the model, in chunk order.
 
-    Figures are numbered in prompt order. An unreadable figure takes no label
+    Figures are numbered in prompt order. No figure file is read here. A
+    figure whose file is missing, or outside ``IMAGES_DIR``, takes no label
     and does not count toward ``max_images``.
 
     Args:
@@ -184,12 +187,14 @@ def select_figures(chunks: list[Document], max_images: int) -> list[PromptFigure
     """
     figures: list[PromptFigure] = []
     for chunk_number, chunk in enumerate(chunks, start=1):
-        source = chunk.metadata.get("source") or "unknown document"
-        for position, b64 in enumerate(extract_original_data(chunk)["images_base64"]):
-            if not b64:
+        metadata = chunk.metadata or {}
+        source = metadata.get("source") or "unknown document"
+        for position in range(len(stored_image_paths(metadata))):
+            path = image_file(metadata, position)
+            if path is None:
                 continue
             figures.append(
-                PromptFigure(f"F{len(figures) + 1}", chunk_number, position, chunk.id, source, b64)
+                PromptFigure(f"F{len(figures) + 1}", chunk_number, position, chunk.id, source, path)
             )
             if len(figures) == max_images:
                 return figures
@@ -197,14 +202,15 @@ def select_figures(chunks: list[Document], max_images: int) -> list[PromptFigure
 
 
 def _image_blocks(figures: list[PromptFigure]) -> list[dict]:
-    """Alternate each figure's label with its base64 image block."""
+    """Alternate each figure's label with its image, read from disk as base64."""
     blocks: list[dict] = []
     for figure in figures:
+        b64 = base64.b64encode(figure.path.read_bytes()).decode()
         blocks.append(
             {"type": "text", "text": f"Figure {figure.label}, from {figure.source}, chunk {figure.chunk_number}"}
         )
         blocks.append(
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{figure.base64}"}}
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
         )
     return blocks
 
@@ -250,7 +256,7 @@ def _attach_figures_to_trace(run_tree, figures: list[PromptFigure]) -> None:
     if run_tree is None or not figures:
         return
     run_tree.attachments = {
-        figure.label: ("image/jpeg", base64.b64decode(figure.base64)) for figure in figures
+        figure.label: ("image/jpeg", figure.path.read_bytes()) for figure in figures
     }
 
 

@@ -9,14 +9,12 @@ Functions:
 * :func:`chunk_text_and_tables` - text and tables, no figure read.
 * :func:`stored_image_paths`, :func:`stored_image_count` - which figures a
   chunk has, without reading them.
-* :func:`image_file` - the file behind one image URL, kept inside ``IMAGES_DIR``.
-* :func:`extract_original_data` - text, tables and figures as base64, for the
-  model request and trace attachments.
+* :func:`image_file` - the file behind one figure, kept inside ``IMAGES_DIR``;
+  the image endpoint and the model prompt both find figures through it.
 """
 
 from __future__ import annotations
 
-import base64
 import json
 from pathlib import Path
 from typing import Any
@@ -63,22 +61,6 @@ def stored_image_count(chunk: Document) -> int:
     return len(stored_image_paths(chunk.metadata or {}))
 
 
-def extract_original_data(chunk: Document) -> dict:
-    """Return the chunk's text, tables and figures, the figures as base64.
-
-    Reads every figure file of the chunk; use :func:`chunk_text_and_tables`
-    when the figures are not needed.
-
-    Args:
-        chunk: A retrieved LangChain ``Document``.
-
-    Returns:
-        Dict with ``raw_text``, ``tables_html`` and ``images_base64`` keys.
-    """
-    images_base64 = [_read_image_as_base64(path) for path in stored_image_paths(chunk.metadata or {})]
-    return {**chunk_text_and_tables(chunk), "images_base64": images_base64}
-
-
 def stored_image_paths(metadata: dict) -> list[str]:
     """Return a record's figure paths in stored order."""
     paths = _parse_json_value(metadata.get("image_paths"), [])
@@ -86,7 +68,7 @@ def stored_image_paths(metadata: dict) -> list[str]:
 
 
 def image_file(metadata: dict, position: int) -> Path | None:
-    """Find the file behind one image URL, ``/v1/images/{record_id}/{position}``.
+    """Find the file of one figure, as ``/v1/images/{record_id}/{position}`` names it.
 
     The path comes from the record's metadata and must resolve to a file inside
     ``IMAGES_DIR``; anything else is treated as missing.
@@ -108,17 +90,3 @@ def image_file(metadata: dict, position: int) -> Path | None:
         logger.warning("Stored figure path is outside %s or missing: %s", IMAGES_DIR, paths[position])
         return None
     return full_path
-
-
-def _read_image_as_base64(image_path: str) -> str:
-    """Read one figure (path relative to the repository root) as base64.
-
-    An unreadable file gives an empty string and a warning, not an error.
-    """
-    clean = image_path.lstrip("./")
-    full_path = _PROJECT_ROOT / clean
-    try:
-        return base64.b64encode(full_path.read_bytes()).decode()
-    except OSError as exc:
-        logger.warning("Could not read image %s: %s", full_path, exc)
-        return ""

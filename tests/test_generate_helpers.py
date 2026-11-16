@@ -4,6 +4,8 @@ Cloud/model dependencies are optional; the module is skipped entirely when
 they are not installed so the suite stays lightweight.
 """
 
+from pathlib import Path
+
 import pytest
 
 pytest.importorskip("langsmith")
@@ -107,7 +109,7 @@ def test_trace_inputs_keep_the_question_and_drop_objects():
 
 
 def test_generation_trace_records_figure_labels_not_bytes():
-    figures = [PromptFigure("F1", 1, 0, "id-1", "lm317", "QUFB")]
+    figures = [PromptFigure("F1", 1, 0, "id-1", "lm317", Path("dbv2/images/a.jpg"))]
     recorded = _trace_inputs({"query": "q", "chunks": ["a"], "figures": figures})
     assert recorded == {"question": "q", "num_chunks": 1, "figures": ["F1"]}
 
@@ -234,6 +236,27 @@ def test_trace_attaches_only_the_sent_figures_by_label():
 
     from src.retrieval.generate import _attach_figures_to_trace
 
+    chunks = [_chunk("a", ["A1", "A2"])]
     run_tree = SimpleNamespace(attachments=None)
-    _attach_figures_to_trace(run_tree, [PromptFigure("F1", 1, 0, "r1", "lm317", _b64("A1"))])
+    _attach_figures_to_trace(run_tree, select_figures(chunks, 1))
     assert run_tree.attachments == {"F1": ("image/jpeg", b"A1")}
+
+
+def test_choosing_figures_reads_no_file(monkeypatch):
+    """Bytes are read for the model request and the trace, not when choosing."""
+    chunks = [_chunk("a", ["A1"])]
+
+    def opened(path):
+        raise AssertionError(f"select_figures read {path}")
+
+    monkeypatch.setattr(Path, "read_bytes", opened)
+    assert [figure.label for figure in select_figures(chunks, 0)] == ["F1"]
+
+
+def test_figure_outside_the_images_folder_is_not_sent(_figures_root):
+    """A stored path is used only if it lies inside IMAGES_DIR, as for the image endpoint."""
+    import json
+
+    (_figures_root / "secret.txt").write_bytes(b"secret")
+    chunk = Document(page_content="a", metadata={"image_paths": json.dumps(["secret.txt"])})
+    assert select_figures([chunk], 0) == []

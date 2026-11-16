@@ -279,9 +279,9 @@ def test_building_a_response_reads_no_image_file(client, monkeypatch):
     """Responses carry URLs, so retrieval alone never opens a figure."""
 
     def opened(path):
-        raise AssertionError(f"a response build read the image {path}")
+        raise AssertionError(f"a response build read the file {path}")
 
-    monkeypatch.setattr(src.documents, "_read_image_as_base64", opened)
+    monkeypatch.setattr(src.documents.Path, "read_bytes", opened)
     assert client.post("/v1/retrieve", json={"query": "x", "top_k": 2}).status_code == 200
 
 
