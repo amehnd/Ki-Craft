@@ -39,16 +39,16 @@ A PDF is split into sections, a vision model writes a searchable summary of each
 - **An offline ingestion pipeline** (`src/ingestion/`) that turns a PDF into chunks, summaries, and vectors.
 - **A pre-built vector store** (`dbv2/`), so the API answers questions straight after cloning, with no ingestion run.
 
-The store ships with six documents: 317 chunks and 317 figures. Each document's source name is its PDF's file name in `data/` without `.pdf`, and its chunk export is `json/<source>.json`.
+The store ships with six documents: 310 chunks and 276 figures. Each document's source name is its PDF's file name in `data/` without `.pdf`, and its chunk export is `json/<source>.json`.
 
 | Document | Source name in the store | Chunks |
 |---|---|---|
 | Microchip AN699 (anti-aliasing filters) | `AN699` | 29 |
-| LM555 timer | `lm555` | 36 |
-| LM2596 step-down regulator | `lm2596` | 73 |
-| LM317 adjustable regulator | `lm317` | 54 |
+| LM555 timer | `lm555` | 35 |
+| LM2596 step-down regulator | `lm2596` | 71 |
+| LM317 adjustable regulator | `lm317` | 51 |
 | NE555 precision timer | `ne555` | 47 |
-| TLV1117 LDO regulator | `tlv1117` | 78 |
+| TLV1117 LDO regulator | `tlv1117` | 77 |
 
 ## Screenshots
 
