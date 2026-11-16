@@ -114,7 +114,7 @@ def _figures_root(monkeypatch, tmp_path):
     return tmp_path
 
 
-def _chunk(summary: str, images: list[str]) -> Document:
+def _chunk(summary: str, images: list[str], source: str | None = None) -> Document:
     """A stored chunk whose figure files hold the given strings as bytes."""
     import json
 
@@ -127,7 +127,8 @@ def _chunk(summary: str, images: list[str]) -> Document:
         paths.append(path)
     return Document(
         page_content=summary,
-        metadata={"raw_text": "", "tables_html": "[]", "image_paths": json.dumps(paths)},
+        metadata={"raw_text": "", "tables_html": "[]", "image_paths": json.dumps(paths)}
+        | ({"source": source} if source else {}),
     )
 
 
@@ -145,16 +146,44 @@ def test_every_retrieved_chunk_reaches_the_prompt():
     assert "--- Chunk 8 ---" not in prompt
 
 
+def _images(blocks: list[dict]) -> list[str]:
+    return [block["image_url"]["url"] for block in blocks if block["type"] == "image_url"]
+
+
+def _labels(blocks: list[dict]) -> list[str]:
+    return [block["text"] for block in blocks if block["type"] == "text"]
+
+
 def test_image_cap_takes_images_in_chunk_order():
     """Chunk 1's images come first, then chunk 2's, until the cap."""
     chunks = [_chunk("a", ["A1", "A2"]), _chunk("b", ["B1", "B2"]), _chunk("c", ["C1"])]
-    urls = [block["image_url"]["url"] for block in _collect_images(chunks, 3)]
-    assert urls == [f"data:image/jpeg;base64,{_b64(x)}" for x in ("A1", "A2", "B1")]
+    assert _images(_collect_images(chunks, 3)) == [f"data:image/jpeg;base64,{_b64(x)}" for x in ("A1", "A2", "B1")]
 
 
 def test_image_cap_zero_sends_every_image():
     chunks = [_chunk("a", ["A1", "A2"]), _chunk("b", ["B1"])]
-    assert len(_collect_images(chunks, 0)) == 3
+    assert len(_images(_collect_images(chunks, 0))) == 3
+
+
+def test_each_figure_is_labelled_just_before_its_image():
+    """Labels number figures in prompt order and name the document and chunk."""
+    chunks = [_chunk("a", ["A1"], source="lm317"), _chunk("b", ["B1", "B2"], source="ne555")]
+    blocks = _collect_images(chunks, 0)
+    assert [block["type"] for block in blocks] == ["text", "image_url"] * 3
+    assert _labels(blocks) == [
+        "Figure F1, from lm317, chunk 1",
+        "Figure F2, from ne555, chunk 2",
+        "Figure F3, from ne555, chunk 2",
+    ]
+
+
+def test_unreadable_figure_takes_no_label_or_slot(_figures_root):
+    """A missing file is skipped: the next figure becomes F1 and fills the cap."""
+    chunk = _chunk("a", ["A1", "A2"])
+    (_figures_root / "dbv2" / "images" / "A1.jpg").unlink()
+    blocks = _collect_images([chunk], 1)
+    assert _labels(blocks) == ["Figure F1, from unknown document, chunk 1"]
+    assert _images(blocks) == [f"data:image/jpeg;base64,{_b64('A2')}"]
 
 
 def test_text_only_model_gets_no_images_and_no_mention_of_them():
@@ -167,5 +196,7 @@ def test_text_only_model_gets_no_images_and_no_mention_of_them():
 def test_vision_model_gets_images_and_is_told_about_them():
     chunks = [_chunk("a", ["A1"])]
     content = _build_message_content(chunks, "q", max_images=0, send_images=True)
-    assert [part["type"] for part in content] == ["text", "image_url"]
+    assert [part["type"] for part in content] == ["text", "text", "image_url"]
     assert "attached images" in content[0]["text"]
+    assert "[F1]" in content[0]["text"], "the model is told how to cite a figure"
+    assert content[1]["text"] == "Figure F1, from unknown document, chunk 1"

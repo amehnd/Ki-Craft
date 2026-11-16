@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import base64
 import time
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from typing import Any
 
 from langchain_core.documents import Document
@@ -75,9 +75,9 @@ def _estimate_cost(usage: dict[str, Any]) -> float | None:
 
 def _prompt_stats(message_content: list[dict]) -> tuple[int, int]:
     """Return ``(text_characters, image_count)`` of a message content list."""
-    text = next((x["text"] for x in message_content if x["type"] == "text"), "")
+    text_characters = sum(len(x["text"]) for x in message_content if x["type"] == "text")
     images = sum(1 for x in message_content if x["type"] == "image_url")
-    return len(text), images
+    return text_characters, images
 
 
 def _extract_text(content: Any) -> str:
@@ -98,8 +98,8 @@ def _build_text_prompt(chunks: list[Document], query: str, with_images: bool = T
     Sends enhanced summaries as primary context, with HTML tables appended,
     for every chunk given; the prompt size is set by how many chunks were
     retrieved (``top_k``). Images are sent separately via
-    :func:`_collect_images`. When ``with_images`` is false (a text-only
-    model), the instructions do not mention figures.
+    :func:`_collect_images`. When ``with_images`` is false, the instructions
+    cover the text and tables.
     """
     if with_images:
         contents = "- optional HTML tables,\n- optional attached figures/images.\n\n"
@@ -138,7 +138,8 @@ def _build_text_prompt(chunks: list[Document], query: str, with_images: bool = T
     if with_images:
         parts.append(
             "The attached images are figures from the document. "
-            "Use the summaries, tables, and images together to provide a detailed answer."
+            "Use the summaries, tables, and images together to provide a detailed answer. "
+            "When you use a figure as evidence, cite its label in square brackets, like [F1]."
         )
     else:
         parts.append("Use the summaries and tables together to provide a detailed answer.")
@@ -147,23 +148,31 @@ def _build_text_prompt(chunks: list[Document], query: str, with_images: bool = T
 
 
 def _collect_images(chunks: list[Document], max_images: int) -> list[dict]:
-    """Collect base64 images from chunks into message content blocks.
+    """Collect alternating figure labels and base64 image blocks.
 
-    Images are taken in chunk order (all of chunk 1's, then chunk 2's, ...)
-    until ``max_images`` is reached. 0 means no limit (send all).
+    Figures are numbered in prompt order. Unreadable figures do not take a
+    label or count toward ``max_images``. Zero sends every readable figure.
     """
-    image_blocks: list[dict] = []
-    for chunk in chunks:
+    blocks: list[dict] = []
+    figure_count = 0
+    for chunk_number, chunk in enumerate(chunks, start=1):
+        source = chunk.metadata.get("source") or "unknown document"
         for b64 in extract_original_data(chunk)["images_base64"]:
-            if max_images and len(image_blocks) >= max_images:
-                return image_blocks
-            image_blocks.append(
+            if not b64:
+                continue
+            figure_count += 1
+            blocks.append(
+                {"type": "text", "text": f"Figure F{figure_count}, from {source}, chunk {chunk_number}"}
+            )
+            blocks.append(
                 {
                     "type": "image_url",
                     "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
                 }
             )
-    return image_blocks
+            if figure_count == max_images:
+                return blocks
+    return blocks
 
 
 def _build_message_content(
@@ -174,10 +183,8 @@ def _build_message_content(
     ``max_images`` caps how many images are sent to the model (0 = all).
     ``send_images`` is false for a text-only model: no image blocks at all.
     """
-    content: list[dict] = [{"type": "text", "text": _build_text_prompt(chunks, query, send_images)}]
-    if send_images:
-        content.extend(_collect_images(chunks, max_images))
-    return content
+    figures = _collect_images(chunks, max_images) if send_images else []
+    return [{"type": "text", "text": _build_text_prompt(chunks, query, bool(figures))}, *figures]
 
 
 # What providers report when a reply stopped at max_tokens: OpenAI-style
@@ -289,7 +296,7 @@ def answer_query_stream(
     max_images: int = GENERATION_MAX_IMAGES,
     send_images: bool = True,
     run_tree=None,
-) -> Iterator[StreamEvent]:
+) -> Generator[StreamEvent, None, None]:
     """Retrieve chunks then stream an answer under a single LangSmith trace.
 
     This is the one generation path: the default model and a user-chosen

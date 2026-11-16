@@ -338,7 +338,8 @@ def test_query_returns_answer_and_usage(client, backend):
 
     content = backend.prompts[0][0].content
     assert "QUESTION: LM317 pins" in content[0]["text"]
-    assert content[1]["type"] == "image_url"
+    assert content[1] == {"type": "text", "text": "Figure F1, from tlv1117, chunk 2"}
+    assert content[2]["type"] == "image_url"
 
 
 def test_query_defaults_come_from_settings(client, backend):
@@ -362,8 +363,8 @@ def test_query_llm_failure_is_502(client, backend):
     assert response.json() == {"detail": "The model provider failed: quota exceeded"}
 
 
-@pytest.mark.parametrize("finish_reason", ["length", "MAX_TOKENS"])
 @pytest.mark.parametrize("path", ["/v1/query", "/v1/query/stream"])
+@pytest.mark.parametrize("finish_reason", ["length", "MAX_TOKENS"])
 def test_answer_cut_off_before_any_text_is_502(client, backend, finish_reason, path):
     """OpenAI-style and Gemini names for "stopped at max_tokens" both count."""
     backend.finish_reason = finish_reason
