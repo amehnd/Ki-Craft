@@ -342,6 +342,20 @@ def test_query_returns_answer_and_usage(client, backend):
     assert content[2]["type"] == "image_url"
 
 
+def test_query_lists_the_figures_the_model_saw(client):
+    """Each prompt figure comes back with its label, URL, chunk and document."""
+    body = client.post("/v1/query", json={"query": "LM317 pins", "top_k": 2}).json()
+    assert body["figures"] == [
+        {"label": "F1", "url": f"/v1/images/{TLV1117_ID}/0", "chunk_id": 2, "source": "tlv1117"}
+    ]
+    assert body["figures"][0]["url"] == body["chunks"][1]["image_urls"][0]
+
+
+def test_max_images_zero_lists_every_sent_figure(client):
+    body = client.post("/v1/query", json={"query": "LM317 pins", "top_k": 2, "max_images": 0}).json()
+    assert [figure["label"] for figure in body["figures"]] == ["F1"]
+
+
 def test_query_defaults_come_from_settings(client, backend):
     """Without top_k or max_images the settings decide, and every chunk is used."""
     from config.settings import GENERATION_MAX_IMAGES, RETRIEVAL_K
@@ -406,6 +420,9 @@ def test_stream_emits_retrieval_tokens_done(client):
     done = events[-1][1]
     assert done["answer"] == "Hello world"
     assert done["num_chunks"] == 2
+    assert done["figures"] == [
+        {"label": "F1", "url": f"/v1/images/{TLV1117_ID}/0", "chunk_id": 2, "source": "tlv1117"}
+    ]
     assert "response_id" not in done and "response_id" not in events[0][1]
 
 
@@ -479,6 +496,7 @@ def test_query_with_text_only_model_gets_no_figures(client, backend):
     assert response.json()["usage"]["prompt_images"] == 0
     assert [part["type"] for part in backend.prompts[0][0].content] == ["text"]
     assert response.json()["total_images"] == 1, "the response still lists the chunk's figure URL"
+    assert response.json()["figures"] == [], "but no figure was sent to the model"
 
 
 def test_query_with_llm_without_max_tokens_uses_catalogue_default(client, backend):

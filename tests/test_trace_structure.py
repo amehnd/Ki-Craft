@@ -84,8 +84,8 @@ def _by_name(runs: dict[str, dict]) -> dict[str, dict]:
 def test_events_come_in_order():
     events, _ = _run_query()
     kinds = [kind for kind, _ in events]
-    assert kinds[0] == "chunks" and kinds[-1] == "usage"
-    assert set(kinds[1:-1]) == {"token"}
+    assert kinds[:2] == ["chunks", "figures"] and kinds[-1] == "usage"
+    assert set(kinds[2:-1]) == {"token"}
     assert "".join(value for kind, value in events if kind == "token") == ANSWER
 
 

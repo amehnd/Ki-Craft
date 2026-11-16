@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import base64
 import time
-from collections.abc import Generator, Iterator
+from collections.abc import Generator, Iterator, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.documents import Document
@@ -38,8 +39,29 @@ from src.tracing import summarize_chunks
 logger = get_logger(__name__)
 
 # One item from answer_query_stream: ("chunks", list[Document]),
-# ("token", str) or ("usage", dict).
+# ("figures", list[PromptFigure]), ("token", str) or ("usage", dict).
 StreamEvent = tuple[str, Any]
+
+
+@dataclass(frozen=True)
+class PromptFigure:
+    """One figure sent to the model, labelled ``F<n>`` in prompt order.
+
+    Attributes:
+        label: ``F1``, ``F2``, ... as the prompt names it.
+        chunk_number: 1-based position of its chunk in the retrieved list.
+        position: 0-based index into that chunk's stored figures.
+        record_id: The chunk's store record id, or None if it has none.
+        source: The chunk's document name.
+        base64: The image bytes, base64-encoded.
+    """
+
+    label: str
+    chunk_number: int
+    position: int
+    record_id: str | None
+    source: str
+    base64: str
 
 
 def _capture_usage(obj: Any, usage: dict[str, Any]) -> None:
@@ -97,8 +119,8 @@ def _build_text_prompt(chunks: list[Document], query: str, with_images: bool = T
 
     Sends enhanced summaries as primary context, with HTML tables appended,
     for every chunk given; the prompt size is set by how many chunks were
-    retrieved (``top_k``). Images are sent separately via
-    :func:`_collect_images`. When ``with_images`` is false, the instructions
+    retrieved (``top_k``). Figures are sent separately via
+    :func:`_image_blocks`. When ``with_images`` is false, the instructions
     cover the text and tables.
     """
     if with_images:
@@ -147,44 +169,49 @@ def _build_text_prompt(chunks: list[Document], query: str, with_images: bool = T
     return "\n".join(parts)
 
 
-def _collect_images(chunks: list[Document], max_images: int) -> list[dict]:
-    """Collect alternating figure labels and base64 image blocks.
+def select_figures(chunks: list[Document], max_images: int) -> list[PromptFigure]:
+    """Choose the figures to send to the model, in chunk order.
 
-    Figures are numbered in prompt order. Unreadable figures do not take a
-    label or count toward ``max_images``. Zero sends every readable figure.
+    Figures are numbered in prompt order. An unreadable figure takes no label
+    and does not count toward ``max_images``.
+
+    Args:
+        chunks: Retrieved document chunks.
+        max_images: Most figures to choose; 0 chooses every readable one.
+
+    Returns:
+        The chosen figures, labelled ``F1``, ``F2``, ...
     """
-    blocks: list[dict] = []
-    figure_count = 0
+    figures: list[PromptFigure] = []
     for chunk_number, chunk in enumerate(chunks, start=1):
         source = chunk.metadata.get("source") or "unknown document"
-        for b64 in extract_original_data(chunk)["images_base64"]:
+        for position, b64 in enumerate(extract_original_data(chunk)["images_base64"]):
             if not b64:
                 continue
-            figure_count += 1
-            blocks.append(
-                {"type": "text", "text": f"Figure F{figure_count}, from {source}, chunk {chunk_number}"}
+            figures.append(
+                PromptFigure(f"F{len(figures) + 1}", chunk_number, position, chunk.id, source, b64)
             )
-            blocks.append(
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
-                }
-            )
-            if figure_count == max_images:
-                return blocks
+            if len(figures) == max_images:
+                return figures
+    return figures
+
+
+def _image_blocks(figures: list[PromptFigure]) -> list[dict]:
+    """Alternate each figure's label with its base64 image block."""
+    blocks: list[dict] = []
+    for figure in figures:
+        blocks.append(
+            {"type": "text", "text": f"Figure {figure.label}, from {figure.source}, chunk {figure.chunk_number}"}
+        )
+        blocks.append(
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{figure.base64}"}}
+        )
     return blocks
 
 
-def _build_message_content(
-    chunks: list[Document], query: str, max_images: int, send_images: bool = True
-) -> list[dict]:
-    """Build the full multimodal message content list (text + images).
-
-    ``max_images`` caps how many images are sent to the model (0 = all).
-    ``send_images`` is false for a text-only model: no image blocks at all.
-    """
-    figures = _collect_images(chunks, max_images) if send_images else []
-    return [{"type": "text", "text": _build_text_prompt(chunks, query, bool(figures))}, *figures]
+def _build_message_content(chunks: list[Document], query: str, figures: list[PromptFigure]) -> list[dict]:
+    """Build the full multimodal message content list (text, then labelled figures)."""
+    return [{"type": "text", "text": _build_text_prompt(chunks, query, bool(figures))}, *_image_blocks(figures)]
 
 
 # What providers report when a reply stopped at max_tokens: OpenAI-style
@@ -218,31 +245,13 @@ def default_llm() -> BaseChatModel:
     )
 
 
-def _collect_image_attachments(chunks: list[Document]) -> dict:
-    """Gather images from chunks as binary attachments for LangSmith traces.
-
-    Uses :func:`extract_original_data` to resolve either storage schema
-    (file-path or inline base64) to image bytes.
-    """
-    attachments: dict = {}
-    img_idx = 0
-    for chunk in chunks:
-        for b64_str in extract_original_data(chunk)["images_base64"]:
-            try:
-                attachments[f"chunk_img_{img_idx}"] = ("image/jpeg", base64.b64decode(b64_str))
-                img_idx += 1
-            except Exception:
-                logger.warning("Could not decode image attachment for trace")
-    return attachments
-
-
-def _attach_images_to_trace(run_tree, chunks: list[Document]) -> None:
-    """Attach retrieved chunk images to ``run_tree`` if any are available."""
-    if run_tree is None:
+def _attach_figures_to_trace(run_tree, figures: list[PromptFigure]) -> None:
+    """Attach the figures sent to the model to ``run_tree``, named by label."""
+    if run_tree is None or not figures:
         return
-    attachments = _collect_image_attachments(chunks)
-    if attachments:
-        run_tree.attachments = attachments
+    run_tree.attachments = {
+        figure.label: ("image/jpeg", base64.b64decode(figure.base64)) for figure in figures
+    }
 
 
 def _trace_inputs(inputs: dict) -> dict:
@@ -254,13 +263,14 @@ def _trace_inputs(inputs: dict) -> dict:
     it; the model id goes into run metadata instead (see
     :func:`answer_query_stream`).
     """
-    recorded = {
-        "question": inputs.get("query"),
-        "max_images": inputs.get("max_images"),
-        "send_images": inputs.get("send_images"),
-    }
+    recorded = {"question": inputs.get("query")}
+    for key in ("max_images", "send_images"):
+        if key in inputs:
+            recorded[key] = inputs[key]
     if "chunks" in inputs:
         recorded["num_chunks"] = len(inputs["chunks"])
+    if "figures" in inputs:
+        recorded["figures"] = [figure.label for figure in inputs["figures"]]
     return recorded
 
 
@@ -315,7 +325,9 @@ def answer_query_stream(
 
     Yields:
         ``("chunks", list[Document])`` once, as soon as retrieval finishes;
-        then ``("token", str)`` for each piece of the answer; then
+        ``("figures", list[PromptFigure])`` once, the figures the prompt
+        carries (empty for a text-only model); then ``("token", str)`` for
+        each piece of the answer; then
         ``("usage", dict)`` once, with token counts, latency and prompt size.
 
     Raises:
@@ -325,19 +337,13 @@ def answer_query_stream(
     if run_tree is not None:
         run_tree.add_metadata({"model": model_id})
     chunks = retrieve_chunks(retriever, query)
-    _attach_images_to_trace(run_tree, chunks)
     yield "chunks", chunks
+    figures = select_figures(chunks, max_images) if send_images else []
+    _attach_figures_to_trace(run_tree, figures)
+    yield "figures", figures
 
     usage: dict[str, Any] = {}
-    for token in generate_answer_stream(
-        chunks,
-        query,
-        llm,
-        model_id,
-        usage=usage,
-        max_images=max_images,
-        send_images=send_images,
-    ):
+    for token in generate_answer_stream(chunks, query, llm, model_id, figures=figures, usage=usage):
         yield "token", token
     yield "usage", usage
 
@@ -354,9 +360,8 @@ def generate_answer_stream(
     llm: BaseChatModel,
     model_id: str,
     *,
+    figures: Sequence[PromptFigure] = (),
     usage: dict[str, Any] | None = None,
-    max_images: int = GENERATION_MAX_IMAGES,
-    send_images: bool = True,
 ) -> Iterator[str]:
     """Stream an answer from ``llm`` for already retrieved chunks.
 
@@ -369,11 +374,11 @@ def generate_answer_stream(
         query: The original user query.
         llm: The chat model to answer with.
         model_id: The model's catalogue id, recorded in ``usage``.
+        figures: The figures to send, from :func:`select_figures`; none
+            for a text-only model.
         usage: Optional shared dict filled in place with token counts,
             latency and prompt size as the stream runs; a fresh one is used
             when omitted.
-        max_images: Most images to send to the model (0 = all).
-        send_images: False for a text-only model; no figures are sent.
 
     Yields:
         Answer token strings.
@@ -400,7 +405,7 @@ def generate_answer_stream(
             summary["image_count"],
         )
 
-    message_content = _build_message_content(chunks, query, max_images, send_images)
+    message_content = _build_message_content(chunks, query, list(figures))
 
     prompt_chars, prompt_images = _prompt_stats(message_content)
     usage.update(

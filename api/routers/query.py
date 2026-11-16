@@ -56,7 +56,8 @@ def _requested_llm(llm: LLMSettings | None) -> BaseChatModel | None:
     summary="Retrieve chunks and generate an answer",
     description=(
         "Everything /v1/retrieve returns, plus a complete answer generated "
-        "from the retrieved chunks.\n\n"
+        "from the retrieved chunks, and ``figures``: the figures sent to the "
+        "model, labelled F1, F2, ... as the answer cites them ([F1]).\n\n"
         "Without ``llm`` the server's default model answers. With ``llm`` the "
         "answer comes from that provider and model, using the API key you "
         "send:\n\n"
@@ -84,7 +85,7 @@ async def query(
         HTTPException: 422 when ``llm`` names a provider or model that is
             not in the catalogue.
     """
-    answer, base, usage = await request.app.state.service.answer(
+    answer, base, figures, usage = await request.app.state.service.answer(
         req.query,
         req.top_k,
         req.max_images,
@@ -96,6 +97,7 @@ async def query(
         **base.model_dump(),
         answer=answer,
         answer_characters=len(answer),
+        figures=figures,
         usage=usage,
     )
 
@@ -121,8 +123,10 @@ def _stream_frames(
     )
     with closing(events):
         _, chunks = next(events)
+        _, figures = next(events)
         _, first_token = next(events)
         retrieval = service.to_retrieve_response(req.query, chunks)
+        figure_payloads = [figure.model_dump() for figure in service.to_figure_payloads(figures)]
         yield _sse("retrieval", retrieval.model_dump())
         yield _sse("token", {"delta": first_token})
         tokens = [first_token]
@@ -139,6 +143,7 @@ def _stream_frames(
                             "answer": answer,
                             "answer_characters": len(answer),
                             "num_chunks": retrieval.num_chunks,
+                            "figures": figure_payloads,
                             "usage": value,
                         },
                     )
@@ -158,7 +163,8 @@ def _stream_frames(
         "Once the first answer fragment is ready, the event flow is:\n\n"
         "1. ``event: retrieval`` - full chunk payloads (like /v1/retrieve),\n"
         "2. ``event: token``    - one per answer fragment (field ``delta``),\n"
-        "3. ``event: done``     - final answer, chunk count and usage,\n"
+        "3. ``event: done``     - final answer, chunk count, the figures the "
+        "model saw and usage,\n"
         "4. ``event: error``    - replaces ``done`` on mid-stream failure "
         "(``status`` and ``message``).\n\n"
         "A provider failure before the first fragment returns HTTP 502. "

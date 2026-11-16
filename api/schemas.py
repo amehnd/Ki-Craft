@@ -264,11 +264,34 @@ class UsageMetadata(BaseModel):
     )
 
 
+class FigurePayload(BaseModel):
+    """One figure the model saw, labelled as the prompt labels it.
+
+    An answer cites a figure by its label in square brackets, like ``[F1]``.
+    """
+
+    label: str = Field(..., description="The figure's label in the prompt: F1, F2, ...", examples=["F1"])
+    url: str = Field(
+        ...,
+        description="Stable URL of the figure, /v1/images/{record_id}/{position}",
+        examples=["/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0"],
+    )
+    chunk_id: int = Field(..., description="The chunk_id of its chunk in this response", examples=[1])
+    source: str = Field(..., description="Source document of the figure", examples=["lm317"])
+
+
 class QueryResponse(RetrieveResponse):
     """Result of a full query: retrieved chunks plus the generated answer."""
 
     answer: str = Field(..., description="The LLM-generated answer")
     answer_characters: int = Field(..., description="Length of the answer in characters")
+    figures: list[FigurePayload] = Field(
+        default_factory=list,
+        description=(
+            "The figures sent to the model, in prompt order, capped by max_images. "
+            "Empty for a text-only model."
+        ),
+    )
     usage: "UsageMetadata | None" = Field(
         None,
         description=(
@@ -293,6 +316,14 @@ class QueryResponse(RetrieveResponse):
                     "(1 + R2/R1)."
                 ),
                 "answer_characters": 340,
+                "figures": [
+                    {
+                        "label": "F1",
+                        "url": "/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0",
+                        "chunk_id": 1,
+                        "source": "lm317",
+                    }
+                ],
                 "usage": {
                     "model": "gemini-2.5-flash-lite",
                     "input_tokens": 1024,

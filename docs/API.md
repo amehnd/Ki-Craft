@@ -35,7 +35,7 @@ There are only **three shapes** you need to understand:
 
 1. **Request** — `{"query": "...", "top_k": 5, "max_images": 3}` (`top_k` and `max_images` optional), plus an optional `llm` object on both query endpoints to pick the model.
 2. **`RetrieveResponse`** — the chunks + everything they contain.
-3. **`QueryResponse`** — the same, plus `answer` and `answer_characters`.
+3. **`QueryResponse`** — the same, plus `answer`, `answer_characters` and `figures`.
 
 ### Errors
 
@@ -114,7 +114,7 @@ the Hugging Face router on both query endpoints.
 ## 3. The response — what comes back
 
 This is what `POST /v1/query` returns (identical top-level shape for `/v1/retrieve`,
-minus the two `answer` fields):
+minus `answer`, `answer_characters` and `figures`):
 
 ```jsonc
 {
@@ -124,6 +124,10 @@ minus the two `answer` fields):
   "total_tables": 2,               // sum of tables across chunks
   "answer": "The LM317 is an adjustable linear voltage regulator...",  // /v1/query only
   "answer_characters": 1086,       // /v1/query only
+  "figures": [                     // /v1/query only: the figures the model saw
+    {"label": "F1", "url": "/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0",
+     "chunk_id": 1, "source": "lm317_datasheet.pdf"}
+  ],
   "chunks": [
     {
       "chunk_id": 1,               // 1-based position within this response
@@ -155,6 +159,22 @@ minus the two `answer` fields):
 | `has_table` / `has_image` | boolean | Quick flags to skip rendering empty sections. |
 | `source` | string \| null | Source filename, if the chunk knows it. |
 
+### The figures the model saw
+
+`chunks[].image_urls` lists every figure of every retrieved chunk. `figures`
+lists only the ones sent to the model, in prompt order, capped by `max_images`
+(empty for a text-only model). The prompt labels each one, and the answer
+cites it in square brackets, so `[F1]` in `answer` means the entry whose
+`label` is `F1`. `chunk_id` points to its chunk in `chunks`, and `url` is the
+same URL that chunk lists in `image_urls`.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `label` | string | `F1`, `F2`, ... as the prompt names it |
+| `url` | string | Relative URL of the figure; prefix with the base URL |
+| `chunk_id` | integer | The `chunk_id` of its chunk in this response |
+| `source` | string | Source document of the figure |
+
 ### Getting the figures
 
 Responses carry no image bytes. Each figure is an HTTP URL in `image_urls`,
@@ -183,7 +203,7 @@ fragment before sending the response headers.
 |---|---|---|
 | `retrieval` | a full `RetrieveResponse` (the chunks) | first, once the first answer fragment is ready |
 | `token` | `{"delta": "The "}` | many times, one fragment of the answer each |
-| `done` | `{"answer": "...", "answer_characters": 1086, "num_chunks": 2, "usage": {...}}` | after the last token |
+| `done` | `{"answer": "...", "answer_characters": 1086, "num_chunks": 2, "figures": [...], "usage": {...}}` | after the last token; `figures` as in `/v1/query` |
 | `error` | `{"status": 502, "message": "..."}` | replaces `done` if the provider fails after the stream starts. Unexpected server errors carry `status: 500` |
 
 ```bash
@@ -291,4 +311,5 @@ can load them.
 | Evidence only (build your own answer elsewhere) | `POST /v1/retrieve` |
 | A typewriter/streaming answer effect | `POST /v1/query/stream` |
 | The figures of a response | `image_urls` → `GET /v1/images/...` |
+| The figures an answer cites (`[F1]`) | `figures` → match `label` |
 | Just a health/probe check | `GET /health` |

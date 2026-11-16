@@ -29,10 +29,10 @@ from src.documents import chunk_text_and_tables, image_file, stored_image_paths
 from src.embed import load_embedding_model
 from src.llm import accepts_images
 from src.logger import get_logger
-from src.retrieval.generate import StreamEvent, answer_query_stream, default_llm
+from src.retrieval.generate import PromptFigure, StreamEvent, answer_query_stream, default_llm
 from src.retrieval.search import build_retriever, load_vector_store, retrieve_chunks
 
-from api.schemas import ChunkPayload, RetrieveResponse
+from api.schemas import ChunkPayload, FigurePayload, RetrieveResponse
 
 logger = get_logger(__name__)
 
@@ -126,7 +126,8 @@ class RAGService:
 
         Returns:
             The generator from ``answer_query_stream``: ``("chunks", ...)``,
-            then ``("token", ...)`` per answer piece, then ``("usage", ...)``.
+            ``("figures", ...)``, then ``("token", ...)`` per answer piece,
+            then ``("usage", ...)``.
             Nothing runs until it is iterated.
         """
         if llm is None:
@@ -148,33 +149,37 @@ class RAGService:
         llm: BaseChatModel | None = None,
         provider_id: str | None = None,
         model_id: str | None = None,
-    ) -> tuple[str, RetrieveResponse, dict]:
+    ) -> tuple[str, RetrieveResponse, list[FigurePayload], dict]:
         """Retrieve chunks and generate a full answer.
 
         Consumes every event from :meth:`stream_answer`, so the arguments are
         the same and retrieval and generation stay under a single trace.
 
         Returns:
-            A tuple of ``(answer, retrieve_response, usage)`` where ``usage``
-            carries token counts, model, latency and cost estimate.
+            A tuple of ``(answer, retrieve_response, figures, usage)`` where
+            ``figures`` are the figures the model saw and ``usage`` carries
+            token counts, model, latency and cost estimate.
         """
         await self.ensure_ready()
 
-        def _run() -> tuple[str, list, dict]:
+        def _run() -> tuple[str, list, list, dict]:
             chunks: list = []
+            figures: list = []
             tokens: list[str] = []
             usage: dict = {}
             for kind, value in self.stream_answer(query, top_k, max_images, llm, provider_id, model_id):
                 if kind == "chunks":
                     chunks = value
+                elif kind == "figures":
+                    figures = value
                 elif kind == "token":
                     tokens.append(value)
                 else:
                     usage = value
-            return "".join(tokens), chunks, usage
+            return "".join(tokens), chunks, figures, usage
 
-        answer, chunks, usage = await asyncio.to_thread(_run)
-        return answer, self.to_retrieve_response(query, chunks), usage
+        answer, chunks, figures, usage = await asyncio.to_thread(_run)
+        return answer, self.to_retrieve_response(query, chunks), self.to_figure_payloads(figures), usage
 
     async def image(self, record_id: str, position: int) -> Path | None:
         """Find one figure of a stored record, for ``/v1/images/{record_id}/{position}``.
@@ -201,6 +206,24 @@ class RAGService:
         return image_file(metadatas[0] or {}, position)
 
     # -- payload assembly ---------------------------------------------------
+
+    @staticmethod
+    def to_figure_payloads(figures: list[PromptFigure]) -> list[FigurePayload]:
+        """Describe the figures sent to the model by label, URL, chunk and source.
+
+        A figure's ``chunk_id`` is its chunk's 1-based position, the same
+        number the response's ``chunks`` use.
+        """
+        return [
+            FigurePayload(
+                label=figure.label,
+                url=f"/v1/images/{figure.record_id}/{figure.position}",
+                chunk_id=figure.chunk_number,
+                source=figure.source,
+            )
+            for figure in figures
+            if figure.record_id
+        ]
 
     def to_retrieve_response(self, query: str, chunks: list) -> RetrieveResponse:
         """Build the API response for a set of retrieved chunks.
