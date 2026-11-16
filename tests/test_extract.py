@@ -46,11 +46,29 @@ def test_headers_footers_and_repeated_logos_are_dropped():
 
 
 def test_an_image_on_fewer_pages_is_kept():
-    kept = extract.remove_page_decoration(_page(1) + _page(2), min_pages=3)
-    assert sum("TEXAS" in e.text for e in kept if isinstance(e, Image)) == 2
+    """A short image without a vendor word must repeat on min_pages pages to go."""
+    pages = _page(1, "PIN 1 GND") + _page(2, "PIN 1 GND")
+    kept = extract.remove_page_decoration(pages, min_pages=3, logo_words=("texas", "instruments"))
+    assert sum(e.text == "PIN 1 GND" for e in kept if isinstance(e, Image)) == 2
 
 
 def test_document_context_uses_the_running_header():
     elements = [_on(Title("1 Features"), 1)] + _page(1) + _page(2)
     assert extract.document_context(elements, "ne555") == "ne555: NE555 SLFS022K"
     assert extract.document_context([_on(Title("x"), 1)], "ne555") == "ne555"
+
+
+def test_a_short_image_naming_the_vendor_is_dropped_even_once():
+    """OCR may read only part of a logo, so it does not repeat on enough pages."""
+    elements = [
+        _on(Image("INSTRUMENTS"), 1),
+        _on(Image("Figure 6-1 functional block diagram, Texas Instruments NE555 timer internal comparators and flip-flop"), 2),
+    ]
+    kept = extract.remove_page_decoration(elements, min_pages=3, logo_words=("texas", "instruments"))
+    assert [e.text for e in kept] == [elements[1].text], "a long caption naming the vendor is a real figure"
+
+
+def test_logo_words_come_from_settings():
+    from config.settings import PDF_LOGO_WORDS
+
+    assert {"texas", "instruments", "microchip"} <= set(PDF_LOGO_WORDS)

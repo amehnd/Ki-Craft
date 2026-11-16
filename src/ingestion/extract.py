@@ -19,6 +19,7 @@ from unstructured.partition.pdf import partition_pdf
 
 from config.settings import (
     PDF_DECORATION_MIN_PAGES,
+    PDF_LOGO_WORDS,
     PDF_EXTRACT_IMAGE_BLOCK_TYPES,
     PDF_INFER_TABLE_STRUCTURE,
     PDF_STRATEGY,
@@ -80,17 +81,23 @@ def _image_text_key(element) -> str:
     return " ".join(sorted(set(re.findall(r"[a-z]{3,}", (element.text or "").lower()))))
 
 
-def remove_page_decoration(elements: list, min_pages: int = PDF_DECORATION_MIN_PAGES) -> list:
-    """Drop running headers, footers, page numbers and repeated logos.
+def remove_page_decoration(
+    elements: list,
+    min_pages: int = PDF_DECORATION_MIN_PAGES,
+    logo_words: tuple[str, ...] = PDF_LOGO_WORDS,
+) -> list:
+    """Drop running headers, footers, page numbers and logos.
 
     Header, footer and page-number elements are dropped by type. An image is
-    dropped as a logo when its OCR text is at most ``_LOGO_MAX_WORDS`` words
-    and the same words appear on ``min_pages`` or more pages. Images with no
-    OCR words are kept.
+    a logo when its OCR text is at most ``_LOGO_MAX_WORDS`` words and either
+    the same words appear on ``min_pages`` or more pages, or one of them is in
+    ``logo_words`` (a vendor name). The word limit keeps a real figure whose
+    caption names the vendor. Images with no OCR words are kept.
 
     Args:
         elements: Elements from :func:`partition_document`, in page order.
         min_pages: On how many pages an image must repeat to count as a logo.
+        logo_words: Vendor-name words that mark a short image as a logo.
 
     Returns:
         The elements that describe the document's content, in the same order.
@@ -101,7 +108,8 @@ def remove_page_decoration(elements: list, min_pages: int = PDF_DECORATION_MIN_P
             pages_by_key[_image_text_key(element)].add(element.metadata.page_number)
     logos = {
         key for key, pages in pages_by_key.items()
-        if len(pages) >= min_pages and len(key.split()) <= _LOGO_MAX_WORDS
+        if len(key.split()) <= _LOGO_MAX_WORDS
+        and (len(pages) >= min_pages or set(key.split()) & set(logo_words))
     }
 
     kept = [

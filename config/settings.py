@@ -141,6 +141,17 @@ PDF_EXTRACT_IMAGE_BLOCK_TYPES: list[str] = ["Image"]
 PDF_INFER_TABLE_STRUCTURE: bool = True
 # An image whose OCR words repeat on this many pages is a logo, not a figure.
 PDF_DECORATION_MIN_PAGES: int = 3
+# A short image whose OCR text contains one of these words is a vendor logo,
+# even on fewer pages (OCR sometimes reads only part of it, as "instruments").
+# Whole words, lowercase; comma-separated in the environment.
+PDF_LOGO_WORDS: tuple[str, ...] = tuple(
+    word.strip().lower()
+    for word in os.getenv(
+        "PDF_LOGO_WORDS",
+        "texas,instruments,microchip,onsemi,nxp,infineon,renesas,stmicroelectronics",
+    ).split(",")
+    if word.strip()
+)
 
 # ---------------------------------------------------------------------------
 # Chunking settings (unstructured chunk_by_title)

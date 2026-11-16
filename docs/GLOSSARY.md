@@ -54,7 +54,7 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **hi_res strategy.** The `unstructured` mode that renders each page as an image and runs a layout detection model on it to find tables and figures. Accurate but slow and heavy, which is why production uses the hosted API.
 
-**Page decoration.** What is printed on every page rather than written about the content: the running header (part numbers, document number, revision date), the footer, page numbers and the vendor logo. `src/ingestion/extract.py:remove_page_decoration` drops it before chunking. Headers and footers go by the type `unstructured` gives them; an image is a logo when its OCR text is short (6 words or fewer) and repeats on 3 or more pages.
+**Page decoration.** What is printed on every page rather than written about the content: the running header (part numbers, document number, revision date), the footer, page numbers and the vendor logo. `src/ingestion/extract.py:remove_page_decoration` drops it before chunking. Headers and footers go by the type `unstructured` gives them; an image is a logo when its OCR text is short (6 words or fewer) and either repeats on 3 or more pages or contains a vendor name from `PDF_LOGO_WORDS` (OCR sometimes reads only part of a logo, such as "instruments").
 
 **Chunking by title.** Grouping elements into chunks that start at each section heading, so a chunk follows the document's own sections. `src/ingestion/chunk.py`.
 
