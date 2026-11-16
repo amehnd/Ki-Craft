@@ -1,18 +1,24 @@
 """PDF extraction step.
 
-Uses Unstructured's ``partition_pdf`` to turn a PDF file into a list of raw
-content ``Element`` objects, configured to extract embedded images and infer
-table structure for downstream multimodal processing.
+:func:`partition_document` uses Unstructured's ``partition_pdf`` to turn a PDF
+into a list of ``Element`` objects (titles, text, tables, images), with each
+figure attached as base64. :func:`remove_page_decoration` then drops what is
+printed on every page rather than written about the content: running headers,
+footers, page numbers and repeated logos. :func:`document_context` keeps the
+running header once, as a label for the whole document.
 """
 
 from __future__ import annotations
 
 import logging
+import re
+from collections import Counter, defaultdict
 from pathlib import Path
 
 from unstructured.partition.pdf import partition_pdf
 
 from config.settings import (
+    PDF_DECORATION_MIN_PAGES,
     PDF_EXTRACT_IMAGE_BLOCK_TYPES,
     PDF_INFER_TABLE_STRUCTURE,
     PDF_STRATEGY,
@@ -56,3 +62,71 @@ def partition_document(file_path: str | Path) -> list:
         extract_images_in_pdf=False,
         chunking_strategy=None,
     )
+
+
+# Element types Unstructured gives to text printed on every page, not content.
+_PAGE_DECORATION_TYPES = {"Header", "Footer", "PageNumber"}
+# A logo's OCR text is a few words ("texas instruments www com"); a graph's
+# axis labels and title are more, so a repeated graph is never taken for a logo.
+_LOGO_MAX_WORDS = 6
+
+
+def _image_text_key(element) -> str:
+    """The words (3+ letters) an image's OCR text contains, sorted, lowercase.
+
+    OCR of the same logo varies in stray characters ("I} TEXAS INSTRUMENTS"
+    vs "TEXAS INSTRUMENTS"), so the key ignores everything but real words.
+    """
+    return " ".join(sorted(set(re.findall(r"[a-z]{3,}", (element.text or "").lower()))))
+
+
+def remove_page_decoration(elements: list, min_pages: int = PDF_DECORATION_MIN_PAGES) -> list:
+    """Drop running headers, footers, page numbers and repeated logos.
+
+    Header, footer and page-number elements are dropped by type. An image is
+    dropped as a logo when its OCR text is at most ``_LOGO_MAX_WORDS`` words
+    and the same words appear on ``min_pages`` or more pages. Images with no
+    OCR words are kept.
+
+    Args:
+        elements: Elements from :func:`partition_document`, in page order.
+        min_pages: On how many pages an image must repeat to count as a logo.
+
+    Returns:
+        The elements that describe the document's content, in the same order.
+    """
+    pages_by_key: dict[str, set] = defaultdict(set)
+    for element in elements:
+        if type(element).__name__ == "Image" and _image_text_key(element):
+            pages_by_key[_image_text_key(element)].add(element.metadata.page_number)
+    logos = {
+        key for key, pages in pages_by_key.items()
+        if len(pages) >= min_pages and len(key.split()) <= _LOGO_MAX_WORDS
+    }
+
+    kept = [
+        element
+        for element in elements
+        if type(element).__name__ not in _PAGE_DECORATION_TYPES
+        and not (type(element).__name__ == "Image" and _image_text_key(element) in logos)
+    ]
+    logger.info("Removed %d page-decoration elements of %d", len(elements) - len(kept), len(elements))
+    return kept
+
+
+def document_context(elements: list, source: str) -> str:
+    """Name the document for the summary prompt: its source and running header.
+
+    The running header (the most common ``Header`` text) is the publisher's own
+    label for the document, for example the part numbers and document number.
+
+    Args:
+        elements: Elements from :func:`partition_document`, before
+            :func:`remove_page_decoration`.
+        source: The document's name in the store.
+
+    Returns:
+        ``"<source>: <header>"``, or just ``source`` when there is no header.
+    """
+    headers = Counter(e.text.strip() for e in elements if type(e).__name__ == "Header" and e.text.strip())
+    return f"{source}: {headers.most_common(1)[0][0]}" if headers else source

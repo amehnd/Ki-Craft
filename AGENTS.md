@@ -90,7 +90,7 @@ config/providers.py     catalogue of LLM providers and models the query llm obje
 src/embed.py            the one embedding factory (IBM watsonx Granite, 768 dims)
 src/llm.py              the one chat model factory: catalogue entry -> LangChain client
 src/ingestion/          offline pipeline: PDF -> elements -> chunks -> summaries -> Chroma
-  extract.py              unstructured partition_pdf (hi_res, tables, images)
+  extract.py              unstructured partition_pdf (hi_res, tables, images); drops headers, footers, logos
   chunk.py                chunk_by_title
   enrich.py               vision LLM summary per chunk (HF router GLM-4.5V, or local mlx_vlm Qwen3.5-4B)
   export.py               chunks -> JSON export

@@ -148,32 +148,25 @@ def _extra_request_fields(backend: str) -> dict:
     }
 
 
-def _build_enhancement_prompt(text: str, tables: list[str]) -> str:
-    """Build the text prompt for AI-based content enhancement."""
-    prompt = (
-        "You are creating a searchable description for document content retrieval.\n\n"
-        "CONTENT TO ANALYZE:\n"
-        "TEXT CONTENT:\n"
-        f"{text}\n\n"
-    )
-
-    if tables:
-        prompt += "TABLES:\n"
-        for i, table in enumerate(tables):
-            prompt += f"Table {i + 1}:\n{table}\n\n"
-
+def _build_enhancement_prompt(text: str, tables: list[str], document: str = "") -> str:
+    """Build the summary prompt for one chunk of ``document``."""
+    prompt = "You are writing a search index entry for one chunk of a technical document.\n\n"
+    if document:
+        prompt += f"DOCUMENT: {document}\n\n"
+    prompt += f"CHUNK TEXT:\n{text}\n\n"
+    for i, table in enumerate(tables, start=1):
+        prompt += f"TABLE {i}:\n{table}\n\n"
     prompt += (
-        "YOUR TASK:\n"
-        "Generate a comprehensive, searchable description that covers:\n\n"
-        "1. Key facts, numbers, and data points from text and tables\n"
-        "2. Main topics and concepts discussed\n"
-        "3. Questions this content could answer\n"
-        "4. Visual content analysis (charts, diagrams, patterns in images)\n"
-        "5. Alternative search terms users might use\n\n"
-        "Make it detailed and searchable - prioritize findability over brevity.\n\n"
-        "SEARCHABLE DESCRIPTION:"
+        "Describe what this chunk contains: its specific facts, numbers and conditions,\n"
+        "and what each attached table or figure shows. Name the part number where it\n"
+        "helps a search.\n"
+        "Do not repeat facts about the whole document (manufacturer, document number,\n"
+        "revision dates, the list of part variants) unless this chunk is about them.\n"
+        "Use only facts present in the content; do not guess.\n"
+        "Then list up to 3 questions this chunk answers and up to 3 other search terms,\n"
+        "each specific to this chunk.\n"
+        "Plain text, no headings, at most about 200 words."
     )
-
     return prompt
 
 
@@ -183,6 +176,7 @@ def create_ai_enhanced_summary(
     tables: list[str],
     images: list[str],
     backend: str = ENHANCEMENT_BACKEND,
+    document: str = "",
 ) -> str:
     """Ask the summary model for a searchable description of one chunk.
 
@@ -193,6 +187,8 @@ def create_ai_enhanced_summary(
         images: Base64 JPEG figures of the chunk; at most
             ``ENHANCEMENT_MAX_IMAGES`` are sent (0 = all).
         backend: Which entry of ``ENHANCEMENT_BACKENDS`` names the model.
+        document: What the chunk belongs to, from
+            :func:`src.ingestion.extract.document_context`.
 
     Returns:
         The summary text. A summary cut off by ``ENHANCEMENT_MAX_TOKENS`` is
@@ -203,7 +199,7 @@ def create_ai_enhanced_summary(
             the model returns no text.
     """
     sent = images[:ENHANCEMENT_MAX_IMAGES] if ENHANCEMENT_MAX_IMAGES else images
-    content: list[dict] = [{"type": "text", "text": _build_enhancement_prompt(text, tables)}]
+    content: list[dict] = [{"type": "text", "text": _build_enhancement_prompt(text, tables, document)}]
     content.extend(
         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}} for b64 in sent
     )
@@ -228,7 +224,7 @@ def create_ai_enhanced_summary(
 
 
 @traceable(run_type="chain", name="SummariseChunks")
-def summarise_chunks(chunks: list, backend: str = ENHANCEMENT_BACKEND) -> list[Document]:
+def summarise_chunks(chunks: list, backend: str = ENHANCEMENT_BACKEND, document: str = "") -> list[Document]:
     """Summarise every chunk and wrap each as a LangChain ``Document``.
 
     A chunk with tables or images gets a model summary; a text-only chunk
@@ -237,6 +233,7 @@ def summarise_chunks(chunks: list, backend: str = ENHANCEMENT_BACKEND) -> list[D
     Args:
         chunks: Unstructured chunks, in document order.
         backend: ``huggingface`` or ``local``; see ``ENHANCEMENT_BACKENDS``.
+        document: What the chunks belong to; named in every summary prompt.
 
     Returns:
         One Document per chunk: the summary as ``page_content``, and
@@ -255,7 +252,7 @@ def summarise_chunks(chunks: list, backend: str = ENHANCEMENT_BACKEND) -> list[D
         if content["tables"] or content["images"]:
             t0 = time.monotonic()
             summary = create_ai_enhanced_summary(
-                client, content["text"], content["tables"], content["images"], backend
+                client, content["text"], content["tables"], content["images"], backend, document
             )
             logger.info(
                 "  Chunk %d/%d: summarised (%d tables, %d images) in %.1fs",

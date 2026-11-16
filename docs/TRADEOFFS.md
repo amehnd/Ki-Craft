@@ -98,6 +98,8 @@ Why summarise at all: a raw chunk might be a table of numbers that embeds poorly
 | No summary, embed raw text | Simplest; nothing to hallucinate | Figures are invisible; tables match badly |
 | Multi-vector (embed both raw and summary) (to research) | Best recall | Twice the vectors; more to explain |
 
+**What the model is given (2026-11-16).** Page decoration is removed before chunking: on `ne555.pdf` that was 44 running headers, 4 footers and 28 of 78 "figures", which were the TI logo. Left in, the header put the part list, document number and dates into most summaries, and the logo took figure slots both in the summary call and in the answer prompt (`max_images`). The running header is kept once as the prompt's `DOCUMENT` line, so a chunk can still name its part. The prompt asks for what is specific to the chunk, in plain text of at most about 200 words, with at most 3 questions and 3 search terms; `ENHANCEMENT_MAX_TOKENS` is 512, because the embedder reads only the first 512 tokens.
+
 A summary can hallucinate. That is acceptable only because the answer is generated from the original content, not the summary. The summary's job is just to be found.
 
 Both backends speak the OpenAI chat protocol, so one client serves both; only the base URL, the model id and three extra request fields differ (`ENHANCEMENT_BACKENDS` in `config/settings.py`). Any other OpenAI-compatible server (Ollama serves one at `http://localhost:11434/v1`) is one more entry.

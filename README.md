@@ -414,7 +414,7 @@ The summary settings are environment variables (defaults in `config/settings.py`
 | `ENHANCEMENT_BACKEND` | `huggingface` | `huggingface` or `local`; `--backend` overrides it |
 | `LOCAL_ENHANCEMENT_BASE_URL` | `http://127.0.0.1:8080/v1` | Where `mlx_vlm.server` listens |
 | `LOCAL_ENHANCEMENT_MODEL` | `mlx-community/Qwen3.5-4B-MLX-4bit` | Model id sent to the server |
-| `ENHANCEMENT_MAX_TOKENS` | `1024` | Longest summary |
+| `ENHANCEMENT_MAX_TOKENS` | `512` | Longest summary; the embedder reads only the first 512 tokens |
 | `ENHANCEMENT_TEMPERATURE` | `0.0` | Sampling temperature |
 | `ENHANCEMENT_TIMEOUT_SECONDS` | `300` | One call's time limit before a retry |
 | `ENHANCEMENT_MAX_RETRIES` | `2` | Retries, with exponential backoff, before the PDF fails |

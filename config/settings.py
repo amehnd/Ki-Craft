@@ -139,6 +139,8 @@ GENERATION_OUTPUT_PRICE_PER_1M: float = float(
 PDF_STRATEGY: str = "hi_res"
 PDF_EXTRACT_IMAGE_BLOCK_TYPES: list[str] = ["Image"]
 PDF_INFER_TABLE_STRUCTURE: bool = True
+# An image whose OCR words repeat on this many pages is a logo, not a figure.
+PDF_DECORATION_MIN_PAGES: int = 3
 
 # ---------------------------------------------------------------------------
 # Chunking settings (unstructured chunk_by_title)
@@ -167,7 +169,9 @@ ENHANCEMENT_BACKENDS: dict[str, dict[str, str]] = {
     },
 }
 ENHANCEMENT_TEMPERATURE: float = float(os.getenv("ENHANCEMENT_TEMPERATURE", "0.0"))
-ENHANCEMENT_MAX_TOKENS: int = int(os.getenv("ENHANCEMENT_MAX_TOKENS", "1024"))
+# The embedder reads only the first EMBEDDING_MAX_INPUT_TOKENS (512) of a
+# summary, so a longer one costs generation time and is never searched.
+ENHANCEMENT_MAX_TOKENS: int = int(os.getenv("ENHANCEMENT_MAX_TOKENS", "512"))
 # Seconds one summary call may take before it is retried. A 4B model on a
 # laptop can need a minute or more for a chunk with several figures.
 ENHANCEMENT_TIMEOUT_SECONDS: float = float(os.getenv("ENHANCEMENT_TIMEOUT_SECONDS", "300"))

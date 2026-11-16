@@ -31,7 +31,7 @@ from src.embed import load_embedding_model
 from src.ingestion.chunk import create_chunks_by_title
 from src.ingestion.enrich import summarise_chunks
 from src.ingestion.export import export_chunks_to_json
-from src.ingestion.extract import partition_document
+from src.ingestion.extract import document_context, partition_document, remove_page_decoration
 from src.logger import get_logger
 
 logger = get_logger(__name__)
@@ -153,7 +153,7 @@ def run_complete_ingestion_pipeline(
     export_dir: str | Path = JSON_EXPORT_DIR,
     backend: str = ENHANCEMENT_BACKEND,
 ) -> Chroma:
-    """Ingest one PDF: partition, chunk, summarise, export, write figures, embed.
+    """Ingest one PDF: partition, drop page decoration, chunk, summarise, export, embed.
 
     The document's name (``source``) is the PDF file name without its suffix.
 
@@ -178,8 +178,9 @@ def run_complete_ingestion_pipeline(
         raise FileExistsError(f"{export_path} exists; {source} looks ingested already")
 
     elements = partition_document(pdf_path)
-    chunks = create_chunks_by_title(elements)
-    summarised = summarise_chunks(chunks, backend)
+    document = document_context(elements, source)
+    chunks = create_chunks_by_title(remove_page_decoration(elements))
+    summarised = summarise_chunks(chunks, backend, document)
     export_path.parent.mkdir(parents=True, exist_ok=True)
     export = export_chunks_to_json(summarised, filename=str(export_path))
     db = create_vector_store(documents_from_export(export, source, images_dir), persist_directory)

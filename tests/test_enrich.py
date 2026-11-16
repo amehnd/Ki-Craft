@@ -119,3 +119,12 @@ def test_huggingface_backend_needs_a_token(monkeypatch):
     with pytest.raises(SummaryError, match="HF_TOKEN"):
         check_enhancement_backend("huggingface")
 
+
+def test_prompt_names_the_document_and_asks_for_chunk_specific_text(monkeypatch):
+    bodies = _server(monkeypatch, lambda r: _reply("summary"))
+    client = enrich.create_enhancement_client("local")
+    create_ai_enhanced_summary(client, "pin 1 GND", [], [], "local", document="ne555: NE555 SLFS022K")
+    prompt = bodies[0]["messages"][0]["content"][0]["text"]
+    assert "DOCUMENT: ne555: NE555 SLFS022K" in prompt
+    assert "Do not repeat facts about the whole document" in prompt
+    assert "CHUNK TEXT:\npin 1 GND" in prompt
