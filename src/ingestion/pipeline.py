@@ -22,6 +22,7 @@ from langsmith import traceable
 from config.settings import (
     CHROMA_COLLECTION_METADATA,
     CHROMA_PERSIST_DIR,
+    ENHANCEMENT_BACKEND,
     IMAGES_DIR,
     JSON_EXPORT_DIR,
 )
@@ -113,6 +114,7 @@ def run_complete_ingestion_pipeline(
     persist_directory: str = CHROMA_PERSIST_DIR,
     images_dir: str | Path = IMAGES_DIR,
     export_dir: str | Path = JSON_EXPORT_DIR,
+    backend: str = ENHANCEMENT_BACKEND,
 ) -> Chroma:
     """Ingest one PDF: partition, chunk, summarise, export, write figures, embed.
 
@@ -123,6 +125,7 @@ def run_complete_ingestion_pipeline(
         persist_directory: Folder of the Chroma store.
         images_dir: Folder the figure files are written to.
         export_dir: Folder the chunk export ``<source>.json`` is written to.
+        backend: Summary backend, ``huggingface`` or ``local``.
 
     Returns:
         The Chroma store holding the new records.
@@ -130,6 +133,7 @@ def run_complete_ingestion_pipeline(
     Raises:
         FileExistsError: If ``<export_dir>/<source>.json`` already exists, which
             means the document was ingested before.
+        SummaryError: If a chunk's summary fails; nothing is written then.
     """
     source = Path(pdf_path).stem
     export_path = Path(export_dir) / f"{source}.json"
@@ -138,7 +142,7 @@ def run_complete_ingestion_pipeline(
 
     elements = partition_document(pdf_path)
     chunks = create_chunks_by_title(elements)
-    summarised = summarise_chunks(chunks)
+    summarised = summarise_chunks(chunks, backend)
     export_path.parent.mkdir(parents=True, exist_ok=True)
     export = export_chunks_to_json(summarised, filename=str(export_path))
     db = create_vector_store(documents_from_export(export, source, images_dir), persist_directory)

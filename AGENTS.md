@@ -92,7 +92,7 @@ src/llm.py              the one chat model factory: catalogue entry -> LangChain
 src/ingestion/          offline pipeline: PDF -> elements -> chunks -> summaries -> Chroma
   extract.py              unstructured partition_pdf (hi_res, tables, images)
   chunk.py                chunk_by_title
-  enrich.py               vision LLM summary per chunk (GLM-4.5V via HF router)
+  enrich.py               vision LLM summary per chunk (HF router GLM-4.5V, or local mlx_vlm Qwen3.5-4B)
   export.py               chunks -> JSON export
   pipeline.py             export -> records with figure files; runs the steps and writes Chroma
 src/retrieval/
@@ -149,6 +149,10 @@ API_BASE_URL=http://127.0.0.1:8001 streamlit run app/dashboard.py
 python -m scripts.ingest path/to/document.pdf
 ```
 
+```bash
+python -m scripts.ingest data/ --backend local
+```
+
 Notes:
 
 - Tests must not call the network. Mock external clients (see `tests/test_embed.py`).
@@ -159,6 +163,8 @@ Notes:
 ## Environment variables
 
 `GEMINI_API_KEY`, `HF_TOKEN`, `WATSONX_API_KEY`, `WATSONX_PROJECT_ID`, `WATSONX_URL`, `API_BASE_URL`, `CORS_ALLOWED_ORIGINS`, `GENERATION_MAX_TOKENS`, and the LangSmith variables (`LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`). See `config/settings.py` for defaults. `LANGSMITH_TRACING` is the one tracing switch: when it is unset the legacy `LANGCHAIN_TRACING_V2` is used, and `config/settings.py` writes the result to `LANGSMITH_TRACING_V2`, which the langsmith library checks first.
+
+Ingestion summaries: `ENHANCEMENT_BACKEND` (`huggingface` or `local`) and the `ENHANCEMENT_*` and `LOCAL_ENHANCEMENT_*` tunables; see the README's ingestion section.
 
 Also present in `.env` for the hosted parser: `UNSTRUCTURED_API_KEY` and `UNSTRUCTURED_URL` (the v2 Transform API). A planned `PARSER_BACKEND` (`local` in development, `hosted` in production) will choose between local hi_res and the hosted Parse API; see `docs/TRADEOFFS.md`, section 1.
 

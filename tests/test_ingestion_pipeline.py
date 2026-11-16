@@ -84,7 +84,7 @@ def test_pipeline_writes_export_figures_and_records(tmp_path, monkeypatch):
     stored = {}
     monkeypatch.setattr(pipeline, "partition_document", lambda path: ["element"])
     monkeypatch.setattr(pipeline, "create_chunks_by_title", lambda elements: ["chunk"])
-    monkeypatch.setattr(pipeline, "summarise_chunks", lambda chunks: ["summarised"])
+    monkeypatch.setattr(pipeline, "summarise_chunks", lambda chunks, backend: ["summarised"])
     monkeypatch.setattr(
         pipeline, "export_chunks_to_json",
         lambda docs, filename: (open(filename, "w").write("[]"), _export())[1],

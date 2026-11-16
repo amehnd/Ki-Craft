@@ -86,7 +86,7 @@ There is an interaction with embeddings: the watsonx model accepts only 512 toke
 
 ## 3. Enrichment (chunk summaries)
 
-**Today:** for every chunk, GLM-4.5V on the Hugging Face router receives the text, the tables, and the images and writes a summary (`src/ingestion/enrich.py`). The summary becomes the embedded `page_content`. The Hugging Face free credit this relied on no longer exists, so this step currently has no working provider.
+**Today:** for every chunk with tables or figures, a vision model receives the text, the tables, and the images and writes a summary (`src/ingestion/enrich.py`). The summary becomes the embedded `page_content`. `ENHANCEMENT_BACKEND` (or `scripts/ingest.py --backend`) picks the model: `huggingface` (GLM-4.5V on the Hugging Face router; the free credit is gone) or `local` (Qwen3.5-4B, 4-bit, served on the owner's Mac by `mlx_vlm.server`; added 2026-11-16).
 
 Why summarise at all: a raw chunk might be a table of numbers that embeds poorly against a question like "what is the dropout voltage at 1 A". A summary written in words ("dropout voltage versus load current, 1.2 V typical at 800 mA") matches questions far better, and it describes figures that would otherwise be invisible to a text embedder.
 
@@ -94,13 +94,28 @@ Why summarise at all: a raw chunk might be a table of numbers that embeds poorly
 |---|---|---|
 | Hosted VLM on HF router (GLM-4.5V, previous) (to research) | Strong vision, no local hardware | Free credit is gone; data leaves the machine; the provider can change or disappear |
 | Gemini Flash-Lite (already used for generation) | Same key and vendor as generation; strong vision; cheap with a free tier; has an OpenAI-compatible endpoint, so `enrich.py` barely changes | Rate limits on the free tier; one vendor for two jobs |
-| Local VLM on the M4 (Qwen2.5-VL-7B, Qwen3-VL-8B, Gemma 3 12B via Ollama, LM Studio, or mlx-vlm) (to research) | Free, private (works for NDA datasheets), reproducible, no credits to lose | Slower; a 16 GB machine limits the model to about 8B parameters at 4-bit; quality is somewhat lower on dense tables |
+| Local VLM on the M4 via mlx-vlm, Qwen3.5-4B 4-bit (chosen for local runs, 2026-11-16); larger Qwen-VL or Gemma models, Ollama, LM Studio (to research) | Free, private (works for NDA datasheets), reproducible, no credits to lose | Slower; a 16 GB machine limits the model to about 8B parameters at 4-bit; quality is somewhat lower on dense tables |
 | No summary, embed raw text | Simplest; nothing to hallucinate | Figures are invisible; tables match badly |
 | Multi-vector (embed both raw and summary) (to research) | Best recall | Twice the vectors; more to explain |
 
 A summary can hallucinate. That is acceptable only because the answer is generated from the original content, not the summary. The summary's job is just to be found.
 
-Switching provider is a configuration change: `ENHANCEMENT_BASE_URL` and `ENHANCEMENT_MODEL` point at any OpenAI-compatible server (Ollama serves one at `http://localhost:11434/v1`).
+Both backends speak the OpenAI chat protocol, so one client serves both; only the base URL, the model id and three extra request fields differ (`ENHANCEMENT_BACKENDS` in `config/settings.py`). Any other OpenAI-compatible server (Ollama serves one at `http://localhost:11434/v1`) is one more entry.
+
+The local backend is built for long unattended runs (for example a folder of PDFs overnight), so its failure modes are handled explicitly:
+
+| Failure | Handling |
+|---|---|
+| Server not started | `check_enhancement_backend` fails before any PDF is parsed and prints the start command |
+| Slow or hung call | `ENHANCEMENT_TIMEOUT_SECONDS` (300), then retried |
+| Timeout, connection error, 429, 5xx | the OpenAI client retries `ENHANCEMENT_MAX_RETRIES` times (2) with exponential backoff |
+| Still failing, or no text returned | `SummaryError`; that PDF writes nothing and the batch moves on. Re-running the same command skips PDFs whose export exists, so it resumes |
+| Summary cut off at `ENHANCEMENT_MAX_TOKENS` | kept, with a warning; a partial summary still helps retrieval |
+| Small model repeating itself | `LOCAL_ENHANCEMENT_REPETITION_PENALTY` (1.1) |
+| Large figures using too much memory | `LOCAL_ENHANCEMENT_MAX_PIXELS` (1280 x 28 x 28); `ENHANCEMENT_MAX_IMAGES` caps figures per call |
+| Reasoning spending the token budget | `LOCAL_ENHANCEMENT_THINKING` off |
+
+Before 2026-11-16 a failed call silently stored the chunk's first 300 characters as its summary. That hid a dead provider: a whole document could be indexed with placeholder summaries and nothing would say so. Failing loudly is safer for a batch job.
 
 The summarizer is needed only for **new** documents. The existing 270 summaries are stored in Chroma and in `json/`, and they move to Postgres as they are (section 5).
 
@@ -112,7 +127,7 @@ The summarizer is needed only for **new** documents. The existing 270 summaries 
 2. **A local vision language model.** Deep research is needed on both the serving framework (Ollama, LM Studio, mlx-vlm, llama.cpp) and the model (for example the Qwen-VL and Gemma families), judged on table reading, images per call, speed on the owner's 16 GB M4, and memory.
 3. **Multi-vector embeddings**, embedding more than one representation per chunk (raw text and summary, or several vectors per chunk).
 
-**Status:** to research before Checkpoint 7, which needs a summarizer for uploads.
+**Status:** option 2 works for local and batch ingestion (2026-11-16): Qwen3.5-4B on mlx-vlm. How its summaries compare with GLM-4.5V's on retrieval is still to measure with the evaluation set (Checkpoint 5). The summarizer for uploads in production stays open for Checkpoint 7.
 
 ## 4. Embeddings
 

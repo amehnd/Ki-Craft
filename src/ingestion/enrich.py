@@ -1,29 +1,38 @@
 """Content-type separation and AI-enhanced summary generation.
 
-The second half of ingestion: each unstructured chunk is analysed for its
-content types (text, tables, images), and a multimodal vision model generates
-a searchable summary that captures both the textual data and the visual
-content.  The result is wrapped into a LangChain ``Document`` whose
-``metadata["original_content"]`` stores the raw payload for later retrieval
-and UI rendering.
+Each unstructured chunk is split into its text, tables and images, and a
+vision model writes a searchable summary of all three. The model is served
+over the OpenAI chat protocol by one of two backends, chosen by
+``ENHANCEMENT_BACKEND``: the Hugging Face router, or a local
+``mlx_vlm.server``. Each chunk becomes a LangChain ``Document`` with the
+summary as ``page_content`` and the original content in
+``metadata["original_content"]``.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import time
 from typing import Any
 
 from langchain_core.documents import Document
 from langsmith import traceable
 from langsmith.wrappers import wrap_openai
-from openai import OpenAI
+from openai import APIConnectionError, OpenAI, OpenAIError
 
 from config.settings import (
-    ENHANCEMENT_BASE_URL,
+    ENHANCEMENT_BACKEND,
+    ENHANCEMENT_BACKENDS,
+    ENHANCEMENT_MAX_IMAGES,
+    ENHANCEMENT_MAX_RETRIES,
     ENHANCEMENT_MAX_TOKENS,
-    ENHANCEMENT_MODEL,
     ENHANCEMENT_TEMPERATURE,
+    ENHANCEMENT_TIMEOUT_SECONDS,
     HF_TOKEN,
+    LOCAL_ENHANCEMENT_MAX_PIXELS,
+    LOCAL_ENHANCEMENT_REPETITION_PENALTY,
+    LOCAL_ENHANCEMENT_THINKING,
 )
 from src.logger import get_logger
 
@@ -72,14 +81,71 @@ def separate_content_types(chunk: Any) -> dict:
     return content_data
 
 
-def _create_enhancement_client() -> OpenAI:
-    """Create an OpenAI-compatible client for the enhancement model.
+class SummaryError(RuntimeError):
+    """The summary model failed or returned no text for a chunk."""
 
-    The raw client is wrapped with ``wrap_openai`` so that LangSmith renders
-    the base64 images inside the multimodal trace.
+
+def create_enhancement_client(backend: str = ENHANCEMENT_BACKEND) -> OpenAI:
+    """Create the OpenAI-protocol client for one summary backend.
+
+    The client retries timeouts, connection errors, 429 and 5xx responses with
+    exponential backoff, and is wrapped with ``wrap_openai`` so LangSmith
+    records each call with its images.
+
+    Args:
+        backend: A key of ``ENHANCEMENT_BACKENDS``: ``huggingface`` or ``local``.
+
+    Returns:
+        The wrapped client.
+
+    Raises:
+        KeyError: If ``backend`` is not a known backend.
     """
-    raw = OpenAI(api_key=HF_TOKEN, base_url=ENHANCEMENT_BASE_URL)
+    config = ENHANCEMENT_BACKENDS[backend]
+    # mlx_vlm.server checks a key only when MLX_VLM_SERVER_API_KEY is set for it;
+    # the client still needs a non-empty value.
+    api_key = HF_TOKEN if backend == "huggingface" else os.getenv("MLX_VLM_SERVER_API_KEY", "local")
+    raw = OpenAI(
+        api_key=api_key,
+        base_url=config["base_url"],
+        timeout=ENHANCEMENT_TIMEOUT_SECONDS,
+        max_retries=ENHANCEMENT_MAX_RETRIES,
+    )
     return wrap_openai(raw, chat_name="EnhancementVisionLLM")
+
+
+def check_enhancement_backend(backend: str = ENHANCEMENT_BACKEND) -> None:
+    """Fail fast, before any PDF is parsed, if the backend cannot be reached.
+
+    Raises:
+        SummaryError: If the server does not answer, or the local server does
+            not serve the configured model.
+    """
+    config = ENHANCEMENT_BACKENDS[backend]
+    if backend == "huggingface":
+        if not HF_TOKEN:
+            raise SummaryError("HF_TOKEN is not set; the huggingface backend needs it")
+        return
+    try:
+        served = [m.id for m in create_enhancement_client(backend).models.list()]
+    except APIConnectionError as exc:
+        raise SummaryError(
+            f"No mlx_vlm server at {config['base_url']}. Start one with: "
+            f"python -m mlx_vlm.server --model {config['model']} --port 8080"
+        ) from exc
+    if served and config["model"] not in served:
+        logger.warning("The local server lists %s, not %s; it will load the model on first call", served, config["model"])
+
+
+def _extra_request_fields(backend: str) -> dict:
+    """Request fields only mlx_vlm.server understands; none for Hugging Face."""
+    if backend != "local":
+        return {}
+    return {
+        "max_pixels": LOCAL_ENHANCEMENT_MAX_PIXELS,
+        "repetition_penalty": LOCAL_ENHANCEMENT_REPETITION_PENALTY,
+        "enable_thinking": LOCAL_ENHANCEMENT_THINKING,
+    }
 
 
 def _build_enhancement_prompt(text: str, tables: list[str]) -> str:
@@ -111,104 +177,108 @@ def _build_enhancement_prompt(text: str, tables: list[str]) -> str:
     return prompt
 
 
-@traceable(run_type="llm", name="AIEnhancedSummary")
-def create_ai_enhanced_summary(text: str, tables: list[str], images: list[str]) -> str:
-    """Create an AI-enhanced searchable summary for mixed content.
+def create_ai_enhanced_summary(
+    client: OpenAI,
+    text: str,
+    tables: list[str],
+    images: list[str],
+    backend: str = ENHANCEMENT_BACKEND,
+) -> str:
+    """Ask the summary model for a searchable description of one chunk.
 
     Args:
+        client: From :func:`create_enhancement_client` for the same ``backend``.
         text: Raw OCR text of the chunk.
-        tables: List of HTML table strings.
-        images: List of base64-encoded image strings.
+        tables: HTML tables of the chunk.
+        images: Base64 JPEG figures of the chunk; at most
+            ``ENHANCEMENT_MAX_IMAGES`` are sent (0 = all).
+        backend: Which entry of ``ENHANCEMENT_BACKENDS`` names the model.
 
     Returns:
-        The enhanced summary text, or a fallback summary on failure so the
-        pipeline can continue without the enrichment model.
+        The summary text. A summary cut off by ``ENHANCEMENT_MAX_TOKENS`` is
+        kept, with a warning.
+
+    Raises:
+        SummaryError: If the call still fails after the client's retries, or
+            the model returns no text.
     """
+    sent = images[:ENHANCEMENT_MAX_IMAGES] if ENHANCEMENT_MAX_IMAGES else images
+    content: list[dict] = [{"type": "text", "text": _build_enhancement_prompt(text, tables)}]
+    content.extend(
+        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}} for b64 in sent
+    )
     try:
-        client = _create_enhancement_client()
-        prompt_text = _build_enhancement_prompt(text, tables)
-
-        content: list[dict] = [{"type": "text", "text": prompt_text}]
-        for b64 in images:
-            content.append(
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
-                }
-            )
-
         response = client.chat.completions.create(
-            model=ENHANCEMENT_MODEL,
+            model=ENHANCEMENT_BACKENDS[backend]["model"],
             messages=[{"role": "user", "content": content}],
             temperature=ENHANCEMENT_TEMPERATURE,
             max_tokens=ENHANCEMENT_MAX_TOKENS,
+            extra_body=_extra_request_fields(backend) or None,
         )
-        return response.choices[0].message.content
+    except OpenAIError as exc:
+        raise SummaryError(f"summary call failed: {type(exc).__name__}: {exc}") from exc
 
-    except Exception as e:
-        logger.warning("AI summary failed for chunk: %s", e)
-        fallback = f"{text[:300]}..."
-        if tables:
-            fallback += f" [Contains {len(tables)} table(s)]"
-        if images:
-            fallback += f" [Contains {len(images)} image(s)]"
-        return fallback
+    choice = response.choices[0]
+    summary = (choice.message.content or "").strip()
+    if not summary:
+        raise SummaryError(f"summary model returned no text (finish_reason={choice.finish_reason})")
+    if choice.finish_reason == "length":
+        logger.warning("Summary cut off at ENHANCEMENT_MAX_TOKENS=%d", ENHANCEMENT_MAX_TOKENS)
+    return summary
 
 
 @traceable(run_type="chain", name="SummariseChunks")
-def summarise_chunks(chunks: list) -> list[Document]:
-    """Process all chunks with AI summaries and wrap them as LangChain Documents.
+def summarise_chunks(chunks: list, backend: str = ENHANCEMENT_BACKEND) -> list[Document]:
+    """Summarise every chunk and wrap each as a LangChain ``Document``.
 
-    Each Document stores the enhanced content as ``page_content`` and the full
-    original data (raw text, tables, images) as JSON in ``metadata``.
+    A chunk with tables or images gets a model summary; a text-only chunk
+    keeps its text as the summary, with no model call.
 
     Args:
-        chunks: List of unstructured chunks.
+        chunks: Unstructured chunks, in document order.
+        backend: ``huggingface`` or ``local``; see ``ENHANCEMENT_BACKENDS``.
 
     Returns:
-        List of LangChain ``Document`` objects ready for vector storage.
+        One Document per chunk: the summary as ``page_content``, and
+        ``metadata["original_content"]`` holding ``raw_text``, ``tables_html``
+        and ``images_base64``.
+
+    Raises:
+        SummaryError: If any chunk's summary fails; no partial list is returned.
     """
-    logger.info("Processing chunks with AI summaries...")
-    langchain_documents: list[Document] = []
+    client = create_enhancement_client(backend)
+    documents: list[Document] = []
+    started = time.monotonic()
 
-    for i, chunk in enumerate(chunks):
-        current = i + 1
-        total = len(chunks)
-        logger.info("  Processing chunk %d/%d", current, total)
-
-        content_data = separate_content_types(chunk)
-        logger.debug(
-            "    Types: %s  |  Tables: %d  |  Images: %d",
-            content_data["types"],
-            len(content_data["tables"]),
-            len(content_data["images"]),
-        )
-
-        if content_data["tables"] or content_data["images"]:
-            logger.debug("    -> Creating AI summary for mixed content...")
-            enhanced = create_ai_enhanced_summary(
-                content_data["text"],
-                content_data["tables"],
-                content_data["images"],
+    for i, chunk in enumerate(chunks, start=1):
+        content = separate_content_types(chunk)
+        if content["tables"] or content["images"]:
+            t0 = time.monotonic()
+            summary = create_ai_enhanced_summary(
+                client, content["text"], content["tables"], content["images"], backend
             )
-            logger.debug("    -> Enhanced: %s...", enhanced[:150])
+            logger.info(
+                "  Chunk %d/%d: summarised (%d tables, %d images) in %.1fs",
+                i, len(chunks), len(content["tables"]), len(content["images"]), time.monotonic() - t0,
+            )
         else:
-            logger.debug("    -> Using raw text (no tables/images)")
-            enhanced = content_data["text"]
+            summary = content["text"]
+            logger.info("  Chunk %d/%d: text only, kept as is", i, len(chunks))
 
-        doc = Document(
-            page_content=enhanced,
-            metadata={
-                "original_content": json.dumps(
-                    {
-                        "raw_text": content_data["text"],
-                        "tables_html": content_data["tables"],
-                        "images_base64": content_data["images"],
-                    }
-                )
-            },
+        documents.append(
+            Document(
+                page_content=summary,
+                metadata={
+                    "original_content": json.dumps(
+                        {
+                            "raw_text": content["text"],
+                            "tables_html": content["tables"],
+                            "images_base64": content["images"],
+                        }
+                    )
+                },
+            )
         )
-        langchain_documents.append(doc)
 
-    logger.info("Processed %d chunks", len(langchain_documents))
-    return langchain_documents
+    logger.info("Summarised %d chunks with %s in %.0fs", len(documents), backend, time.monotonic() - started)
+    return documents

@@ -345,7 +345,7 @@ python -m pytest -q -p no:cacheprovider tests/test_embed.py
 
 Ingestion is not needed to use the five documents that ship with the repository. Read this section before running it:
 
-- It calls the vision model once per chunk through the Hugging Face router, which needs `HF_TOKEN` and available credit on that account.
+- It calls a vision model once for every chunk with tables or figures. `--backend huggingface` (the default) uses GLM-4.5V on the Hugging Face router, which needs `HF_TOKEN` and credit. `--backend local` uses a model on your Mac through `mlx_vlm.server`; see below.
 - It calls watsonx once per chunk for the embedding.
 - It writes to the tracked store in `dbv2/chroma_db`, so it changes files that git tracks.
 - There are two entry points. Both store records the same way (`src/ingestion/pipeline.py:documents_from_export`): each figure becomes a file in `dbv2/images`, and the record holds its path and a `source` name.
@@ -372,6 +372,44 @@ Run the pipeline on one PDF:
 ```bash
 python -m scripts.ingest path/to/document.pdf
 ```
+
+### Summarising with a local model
+
+`mlx-vlm` is an optional extra that installs only on Apple silicon:
+
+```bash
+uv sync --extra local
+```
+
+Start the model server in its own terminal and leave it running. The first start downloads the model (about 3 GB) into the Hugging Face cache:
+
+```bash
+python -m mlx_vlm.server --model mlx-community/Qwen3.5-4B-MLX-4bit --host 127.0.0.1 --port 8080
+```
+
+Then ingest one PDF, or every PDF in a folder:
+
+```bash
+python -m scripts.ingest data/ --backend local
+```
+
+Each PDF is done in full or not at all. A PDF whose export (`json/<name>.json`) already exists is skipped, and a PDF that fails is logged while the batch carries on, so an interrupted overnight run resumes with the same command. `--store`, `--images` and `--exports` write somewhere other than the tracked store, for a trial run.
+
+The summary settings are environment variables (defaults in `config/settings.py`):
+
+| Variable | Default | What it does |
+|---|---|---|
+| `ENHANCEMENT_BACKEND` | `huggingface` | `huggingface` or `local`; `--backend` overrides it |
+| `LOCAL_ENHANCEMENT_BASE_URL` | `http://127.0.0.1:8080/v1` | Where `mlx_vlm.server` listens |
+| `LOCAL_ENHANCEMENT_MODEL` | `mlx-community/Qwen3.5-4B-MLX-4bit` | Model id sent to the server |
+| `ENHANCEMENT_MAX_TOKENS` | `1024` | Longest summary |
+| `ENHANCEMENT_TEMPERATURE` | `0.0` | Sampling temperature |
+| `ENHANCEMENT_TIMEOUT_SECONDS` | `300` | One call's time limit before a retry |
+| `ENHANCEMENT_MAX_RETRIES` | `2` | Retries, with exponential backoff, before the PDF fails |
+| `ENHANCEMENT_MAX_IMAGES` | `0` | Most figures per call (0 = all) |
+| `LOCAL_ENHANCEMENT_MAX_PIXELS` | `1003520` | Figures larger than this area are downscaled by the server |
+| `LOCAL_ENHANCEMENT_REPETITION_PENALTY` | `1.1` | Discourages repeated lines |
+| `LOCAL_ENHANCEMENT_THINKING` | `false` | Lets the model reason first (spends `ENHANCEMENT_MAX_TOKENS`) |
 
 Uploading a PDF through the API, with a hosted parser in production, is the goal of Checkpoint 7 in [AGENTS.md](AGENTS.md).
 

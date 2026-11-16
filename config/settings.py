@@ -60,10 +60,6 @@ WATSONX_URL: str = os.getenv("WATSONX_URL", "https://eu-de.ml.cloud.ibm.com")
 EMBEDDING_MODEL: str = "ibm/granite-embedding-278m-multilingual"
 # The model's context limit; longer inputs are truncated by watsonx.
 EMBEDDING_MAX_INPUT_TOKENS: int = 512
-# Multimodal vision LLM used for AI-enhanced chunk summaries during ingestion.
-ENHANCEMENT_MODEL: str = "zai-org/GLM-4.5V"
-# Router endpoint that serves the enhancement model via the OpenAI protocol.
-ENHANCEMENT_BASE_URL: str = "https://router.huggingface.co/v1"
 # Default provider and model used to answer retrieval queries.  Both must be
 # listed in config/providers.py; the API key is GEMINI_API_KEY.
 GENERATION_PROVIDER: str = "gemini"
@@ -155,8 +151,40 @@ CHUNK_ISOLATE_TABLES: bool = False
 # ---------------------------------------------------------------------------
 # Enhancement (AI summary) settings
 # ---------------------------------------------------------------------------
-ENHANCEMENT_TEMPERATURE: float = 0.0
-ENHANCEMENT_MAX_TOKENS: int = 1024
+# Which vision model writes the chunk summaries during ingestion. Both speak
+# the OpenAI chat protocol:
+#   huggingface: GLM-4.5V through the Hugging Face router (needs HF_TOKEN and credit);
+#   local: a model served on this machine by `python -m mlx_vlm.server`.
+ENHANCEMENT_BACKEND: str = _env_choice("ENHANCEMENT_BACKEND", "huggingface", ("huggingface", "local"))
+ENHANCEMENT_BACKENDS: dict[str, dict[str, str]] = {
+    "huggingface": {
+        "base_url": "https://router.huggingface.co/v1",
+        "model": "zai-org/GLM-4.5V",
+    },
+    "local": {
+        "base_url": os.getenv("LOCAL_ENHANCEMENT_BASE_URL", "http://127.0.0.1:8080/v1"),
+        "model": os.getenv("LOCAL_ENHANCEMENT_MODEL", "mlx-community/Qwen3.5-4B-MLX-4bit"),
+    },
+}
+ENHANCEMENT_TEMPERATURE: float = float(os.getenv("ENHANCEMENT_TEMPERATURE", "0.0"))
+ENHANCEMENT_MAX_TOKENS: int = int(os.getenv("ENHANCEMENT_MAX_TOKENS", "1024"))
+# Seconds one summary call may take before it is retried. A 4B model on a
+# laptop can need a minute or more for a chunk with several figures.
+ENHANCEMENT_TIMEOUT_SECONDS: float = float(os.getenv("ENHANCEMENT_TIMEOUT_SECONDS", "300"))
+# Retries after a timeout, connection error, 429 or 5xx, with exponential
+# backoff (done by the OpenAI client). After the last one the document fails.
+ENHANCEMENT_MAX_RETRIES: int = int(os.getenv("ENHANCEMENT_MAX_RETRIES", "2"))
+# Most figures sent with one chunk's summary call (0 = all). Each figure costs
+# prompt tokens and, on a local model, memory.
+ENHANCEMENT_MAX_IMAGES: int = int(os.getenv("ENHANCEMENT_MAX_IMAGES", "0"))
+# Local backend only; sent as extra request fields that mlx_vlm.server reads.
+# Largest image area in pixels; bigger figures are downscaled before encoding.
+# 1280 * 28 * 28 is the cap Qwen-VL models are commonly run with.
+LOCAL_ENHANCEMENT_MAX_PIXELS: int = int(os.getenv("LOCAL_ENHANCEMENT_MAX_PIXELS", str(1280 * 28 * 28)))
+# Above 1.0 discourages the repeated lines small models fall into.
+LOCAL_ENHANCEMENT_REPETITION_PENALTY: float = float(os.getenv("LOCAL_ENHANCEMENT_REPETITION_PENALTY", "1.1"))
+# Off: the summary is the whole answer, and reasoning would spend max_tokens.
+LOCAL_ENHANCEMENT_THINKING: bool = os.getenv("LOCAL_ENHANCEMENT_THINKING", "false").lower() == "true"
 
 # ---------------------------------------------------------------------------
 # API server

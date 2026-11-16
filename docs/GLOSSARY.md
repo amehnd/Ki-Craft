@@ -60,6 +60,18 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **Enrichment (summary).** A vision model's written description of a chunk, including its tables and figures. The summary is what gets embedded; the original is what the answer is built from.
 
+**Summary backend.** Which server writes the summaries: `huggingface` (a hosted model) or `local` (a model on this machine). Chosen with `ENHANCEMENT_BACKEND` or `scripts/ingest.py --backend`. See [OpenAI-compatible API](#api-and-serving).
+
+**MLX and mlx-vlm.** MLX is Apple's array library for Apple silicon; it runs models on the Mac's GPU using the memory the CPU and GPU share. `mlx-vlm` runs vision language models on it, and `python -m mlx_vlm.server` serves one over the OpenAI chat protocol at `http://127.0.0.1:8080/v1`.
+
+**Quantization (4-bit).** Storing a model's weights in fewer bits than the 16 they were trained in. A 4-bit, 4-billion-parameter model needs about 2.5 GB instead of 8 GB, at a small cost in quality; this is what lets it run on a 16 GB laptop.
+
+**Retry with exponential backoff.** After a failed call, wait and try again, doubling the wait each time (for example 0.5 s, 1 s, 2 s), so a busy or restarting server gets time to recover. The OpenAI client does this itself for timeouts, connection errors, 429 and 5xx.
+
+**Optional dependency (extra).** A group of packages installed only on request, declared under `[project.optional-dependencies]` in `pyproject.toml`. `uv sync --extra local` adds `mlx-vlm`; a plain `uv sync` leaves it out (and removes it if present). An environment marker (`sys_platform == 'darwin' and platform_machine == 'arm64'`) also keeps it off machines that cannot run it.
+
+**Repetition penalty.** A sampling setting above 1.0 that makes a token less likely once it has appeared, which stops small models looping on the same line.
+
 ## API and serving
 
 **Lifespan.** The FastAPI hook that runs code once when the server starts and once when it stops. Here it loads the embedding client and the vector store a single time instead of per request. `api/main.py`.
