@@ -16,8 +16,8 @@ from langchain_core.documents import Document
 from src.retrieval.generate import (
     PromptFigure,
     _build_message_content,
-    _build_text_prompt,
-    _image_blocks,
+    _build_messages,
+    _figure_blocks,
     _capture_usage,
     _estimate_cost,
     _extract_text,
@@ -124,7 +124,14 @@ def _figures_root(monkeypatch, tmp_path):
     return tmp_path
 
 
-def _chunk(summary: str, images: list[str], source: str | None = None, record_id: str | None = None) -> Document:
+def _chunk(
+    summary: str,
+    images: list[str],
+    source: str | None = None,
+    record_id: str | None = None,
+    raw_text: str = "",
+    tables: list[str] | None = None,
+) -> Document:
     """A stored chunk whose figure files hold the given strings as bytes."""
     import json
 
@@ -138,7 +145,7 @@ def _chunk(summary: str, images: list[str], source: str | None = None, record_id
     return Document(
         id=record_id,
         page_content=summary,
-        metadata={"raw_text": "", "tables_html": "[]", "image_paths": json.dumps(paths)}
+        metadata={"raw_text": raw_text, "tables_html": json.dumps(tables or []), "image_paths": json.dumps(paths)}
         | ({"source": source} if source else {}),
     )
 
@@ -149,12 +156,67 @@ def _b64(text: str) -> str:
     return base64.b64encode(text.encode()).decode()
 
 
+def _text(content: list[dict]) -> str:
+    return "\n".join(part["text"] for part in content if part["type"] == "text")
+
+
+def _image_blocks(figures) -> list[dict]:
+    return [block for figure in figures for block in _figure_blocks(figure)]
+
+
 def test_every_retrieved_chunk_reaches_the_prompt():
     """No hidden limit: the prompt holds as many chunks as were retrieved."""
     chunks = [_chunk(f"summary {i}", []) for i in range(1, 8)]
-    prompt = _build_text_prompt(chunks, "q")
-    assert "--- Chunk 7 ---" in prompt and "summary 7" in prompt
-    assert "--- Chunk 8 ---" not in prompt
+    prompt = _text(_build_message_content(chunks, "q", []))
+    assert "[Chunk 7] Document: unknown document" in prompt and "summary 7" in prompt
+    assert "[Chunk 8]" not in prompt
+
+
+def test_each_chunk_carries_its_document_summary_text_and_tables():
+    """The original text goes to the model next to the summary, under the document's name."""
+    chunk = _chunk("Summary of pins", [], source="lm317", raw_text="Pin 1 ADJ", tables=["<table>t</table>"])
+    prompt = _text(_build_message_content([chunk], "pins?", []))
+    assert prompt.index("CONTEXT") < prompt.index("[Chunk 1] Document: lm317") < prompt.index("QUESTION: pins?")
+    assert "Summary:\nSummary of pins" in prompt
+    assert "Text:\nPin 1 ADJ" in prompt
+    assert "Table 1:\n<table>t</table>" in prompt
+
+
+def test_a_text_only_chunk_is_written_once():
+    """Its summary is its original text, so the prompt does not repeat it."""
+    chunk = _chunk("Pin 1 ADJ", [], raw_text="Pin 1 ADJ")
+    prompt = _text(_build_message_content([chunk], "q", []))
+    assert prompt.count("Pin 1 ADJ") == 1 and "Summary:" not in prompt
+
+
+def test_figures_follow_their_own_chunk():
+    chunks = [_chunk("a", ["A1"], source="lm317"), _chunk("b", [], source="ne555"), _chunk("c", ["C1"], source="ne555")]
+    content = _build_message_content(chunks, "q", select_figures(chunks, 0))
+    order = [part["text"].split("\n")[0] if part["type"] == "text" else "image" for part in content]
+    assert order == [
+        "CONTEXT",
+        "[Chunk 1] Document: lm317",
+        "Figure F1, from lm317, chunk 1",
+        "image",
+        "[Chunk 2] Document: ne555",
+        "[Chunk 3] Document: ne555",
+        "Figure F2, from ne555, chunk 3",
+        "image",
+        "QUESTION: q",
+    ]
+
+
+def test_system_message_holds_the_rules():
+    """Grounding and one-document rules always; the figure rule only with figures."""
+    chunks = [_chunk("a", ["A1"])]
+    with_figures = _build_messages(chunks, "q", select_figures(chunks, 0))
+    without = _build_messages(chunks, "q", [])
+    assert [type(m).__name__ for m in with_figures] == ["SystemMessage", "HumanMessage"]
+    rules = with_figures[0].content
+    assert "using only the context provided" in rules
+    assert "do not state it" in rules
+    assert "never combine values from different documents" in rules
+    assert "[F1]" in rules and "[F1]" not in without[0].content
 
 
 def _images(blocks: list[dict]) -> list[str]:
@@ -199,18 +261,9 @@ def test_unreadable_figure_takes_no_label_or_slot(_figures_root):
 
 def test_text_only_model_gets_no_images_and_no_mention_of_them():
     chunks = [_chunk("a", ["A1", "A2"]), _chunk("b", ["B1"])]
-    content = _build_message_content(chunks, "q", figures=[])
-    assert [part["type"] for part in content] == ["text"]
-    assert "image" not in content[0]["text"].lower()
-
-
-def test_vision_model_gets_images_and_is_told_about_them():
-    chunks = [_chunk("a", ["A1"])]
-    content = _build_message_content(chunks, "q", select_figures(chunks, 0))
-    assert [part["type"] for part in content] == ["text", "text", "image_url"]
-    assert "attached images" in content[0]["text"]
-    assert "[F1]" in content[0]["text"], "the model is told how to cite a figure"
-    assert content[1]["text"] == "Figure F1, from unknown document, chunk 1"
+    system, user = _build_messages(chunks, "q", [])
+    assert {part["type"] for part in user.content} == {"text"}
+    assert "figure" not in (system.content + _text(user.content)).lower()
 
 
 def test_selected_figures_know_their_chunk_position_and_record():

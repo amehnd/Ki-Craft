@@ -1,7 +1,9 @@
 """Answer generation using a multimodal LLM.
 
-Builds the prompt from retrieved chunks (enhanced summaries + HTML tables +
-base64 images), streams an answer from the chat model it is given, and wraps
+Builds the prompt from retrieved chunks (a system message with the rules,
+then each chunk's document name, summary, original text, HTML tables and
+figures, then the question), streams an answer from the chat model it is
+given, and wraps
 both retrieval and generation under a single LangSmith trace so the whole
 query shows up as one run in the UI. The default model and a user-chosen
 model share this one path; only the ``llm`` passed in differs.
@@ -18,7 +20,7 @@ from typing import Any
 
 from langchain_core.documents import Document
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langsmith import traceable
 
 from config.settings import (
@@ -116,59 +118,39 @@ def _extract_text(content: Any) -> str:
     return str(content)
 
 
-def _build_text_prompt(chunks: list[Document], query: str, with_images: bool = True) -> str:
-    """Build the text portion of the prompt from retrieved chunks.
+_RULES = (
+    "You answer questions about electronics documents using only the context provided. "
+    "If the context does not contain the answer, say that the documents provided do not state it. "
+    "Each chunk names its document; never combine values from different documents "
+    "unless the question asks for a comparison. "
+    "Give values with their units and test conditions exactly as stated."
+)
+_FIGURE_RULE = " When you use a figure, cite its label in square brackets, like [F1]."
 
-    Sends enhanced summaries as primary context, with HTML tables appended,
-    for every chunk given; the prompt size is set by how many chunks were
-    retrieved (``top_k``). Figures are sent separately via
-    :func:`_image_blocks`. When ``with_images`` is false, the instructions
-    cover the text and tables.
+
+def _system_prompt(with_figures: bool) -> str:
+    """The fixed rules; the figure rule only when figures are sent."""
+    return _RULES + (_FIGURE_RULE if with_figures else "")
+
+
+def _chunk_text(chunk: Document, chunk_number: int) -> str:
+    """One chunk as prompt text: its document, summary, original text and tables.
+
+    A chunk with no tables or figures was stored with its original text as
+    its summary, so the text is written once.
     """
-    if with_images:
-        contents = "- optional HTML tables,\n- optional attached figures/images.\n\n"
-        use = "Use both the text summaries and the attached images when answering.\n"
-    else:
-        contents = "- optional HTML tables.\n\n"
-        use = "Use the text summaries and tables when answering.\n"
-    parts = [
-        "You are given retrieved chunks from a technical document.\n"
-        "Each chunk contains:\n"
-        "- a searchable summary of the original content,\n"
-        + contents
-        + "Treat the summaries as authoritative representations of the document.\n"
-        "Do NOT claim information is absent unless you have examined ALL provided chunks.\n"
-        "If a chunk explicitly contains the answer, answer directly using that chunk.\n"
-        + use,
-        f"QUESTION: {query}\n",
-        "RETRIEVED CONTEXT:",
-        "",
-    ]
-
-    for i, chunk in enumerate(chunks):
-        enhanced = chunk.page_content
-        if enhanced:
-            parts.append(f"--- Chunk {i + 1} ---")
-            parts.append(f"SUMMARY:\n{enhanced.strip()}\n")
-
-        tables_html = chunk_text_and_tables(chunk)["tables_html"]
-        if tables_html:
-            parts.append("TABLES:")
-            for j, table in enumerate(tables_html):
-                parts.append(f"Table {j + 1}:\n{table}\n")
-
-        parts.append("")
-
-    if with_images:
-        parts.append(
-            "The attached images are figures from the document. "
-            "Use the summaries, tables, and images together to provide a detailed answer. "
-            "When you use a figure as evidence, cite its label in square brackets, like [F1]."
-        )
-    else:
-        parts.append("Use the summaries and tables together to provide a detailed answer.")
-
-    return "\n".join(parts)
+    source = (chunk.metadata or {}).get("source") or "unknown document"
+    content = chunk_text_and_tables(chunk)
+    summary = (chunk.page_content or "").strip()
+    raw_text = (content["raw_text"] or "").strip()
+    lines = [f"[Chunk {chunk_number}] Document: {source}"]
+    if summary and summary != raw_text:
+        lines.append(f"Summary:\n{summary}")
+    if raw_text:
+        lines.append(f"Text:\n{raw_text}")
+    for number, table in enumerate(content["tables_html"], start=1):
+        lines.append(f"Table {number}:\n{table}")
+    return "\n\n".join(lines)
 
 
 def select_figures(chunks: list[Document], max_images: int) -> list[PromptFigure]:
@@ -201,23 +183,38 @@ def select_figures(chunks: list[Document], max_images: int) -> list[PromptFigure
     return figures
 
 
-def _image_blocks(figures: list[PromptFigure]) -> list[dict]:
-    """Alternate each figure's label with its image, read from disk as base64."""
-    blocks: list[dict] = []
-    for figure in figures:
-        b64 = base64.b64encode(figure.path.read_bytes()).decode()
-        blocks.append(
-            {"type": "text", "text": f"Figure {figure.label}, from {figure.source}, chunk {figure.chunk_number}"}
-        )
-        blocks.append(
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
-        )
-    return blocks
+def _figure_blocks(figure: PromptFigure) -> list[dict]:
+    """A figure's label, then its image read from disk as base64."""
+    b64 = base64.b64encode(figure.path.read_bytes()).decode()
+    return [
+        {"type": "text", "text": f"Figure {figure.label}, from {figure.source}, chunk {figure.chunk_number}"},
+        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+    ]
 
 
 def _build_message_content(chunks: list[Document], query: str, figures: list[PromptFigure]) -> list[dict]:
-    """Build the full multimodal message content list (text, then labelled figures)."""
-    return [{"type": "text", "text": _build_text_prompt(chunks, query, bool(figures))}, *_image_blocks(figures)]
+    """Build the user message: every chunk with its figures right after it, then the question.
+
+    The context comes first and the question last, which suits long
+    multimodal prompts. Every retrieved chunk is included (``top_k`` sets
+    the context size); only the figures in ``figures`` are attached.
+    """
+    content: list[dict] = [{"type": "text", "text": "CONTEXT"}]
+    for chunk_number, chunk in enumerate(chunks, start=1):
+        content.append({"type": "text", "text": _chunk_text(chunk, chunk_number)})
+        for figure in figures:
+            if figure.chunk_number == chunk_number:
+                content.extend(_figure_blocks(figure))
+    content.append({"type": "text", "text": f"QUESTION: {query}"})
+    return content
+
+
+def _build_messages(chunks: list[Document], query: str, figures: list[PromptFigure]) -> list[BaseMessage]:
+    """The system rules and the user message sent to the model."""
+    return [
+        SystemMessage(content=_system_prompt(bool(figures))),
+        HumanMessage(content=_build_message_content(chunks, query, figures)),
+    ]
 
 
 # What providers report when a reply stopped at max_tokens: OpenAI-style
@@ -411,9 +408,10 @@ def generate_answer_stream(
             summary["image_count"],
         )
 
-    message_content = _build_message_content(chunks, query, list(figures))
+    messages = _build_messages(chunks, query, list(figures))
 
-    prompt_chars, prompt_images = _prompt_stats(message_content)
+    prompt_chars, prompt_images = _prompt_stats(messages[1].content)
+    prompt_chars += len(messages[0].content)
     usage.update(
         {
             "model": model_id,
@@ -430,12 +428,11 @@ def generate_answer_stream(
         total_tables,
     )
 
-    message = HumanMessage(content=message_content)
     start = time.perf_counter()
     wrote_text = False
     finish_reason = None
     try:
-        for chunk in llm.stream([message]):
+        for chunk in llm.stream(messages):
             token_text = _extract_text(chunk.content)
             if token_text:
                 wrote_text = True

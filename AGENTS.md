@@ -240,6 +240,7 @@ Each checkpoint is a set of small commits. Finish one, let the owner test and pu
   - only the first 5 chunks' text reaches the prompt while images come from all chunks (moved to Checkpoint 2 on 2026-11-14, done 2026-11-15);
   - streamed usage tokens reporting 0;
   - cost estimates hardcoded to Gemini prices.
+- Answer prompt rewritten 2026-11-16 (`src/retrieval/generate.py:_build_messages`). A system message holds the rules: answer only from the context, say when the documents do not state it, never mix values from different documents, keep units and conditions, cite figures as `[F1]`. The user message gives each chunk's document name, summary, original text (`raw_text`, previously never sent) and tables, each figure right after its chunk, and the question last. On three live questions it stopped presenting the LM555 diagram as the NE555's and gave the LM317 reference voltage range (1.2, 1.25, 1.3 V) where it had invented a 4.95 V maximum; prompts are about 40 to 70 percent longer.
 
 **Checkpoint 4. Frontend separation.**
 - `app/` gets its own small settings module.

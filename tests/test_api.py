@@ -336,10 +336,13 @@ def test_query_returns_answer_and_usage(client, backend):
     assert body["usage"]["input_tokens"] == 10
     assert body["usage"]["prompt_images"] == 1
 
-    content = backend.prompts[0][0].content
-    assert "QUESTION: LM317 pins" in content[0]["text"]
-    assert content[1] == {"type": "text", "text": "Figure F1, from tlv1117, chunk 2"}
-    assert content[2]["type"] == "image_url"
+    system, user = backend.prompts[0]
+    assert "using only the context provided" in system.content
+    content = user.content
+    assert content[-1] == {"type": "text", "text": "QUESTION: LM317 pins"}
+    assert content[2]["text"].startswith("[Chunk 2] Document: tlv1117")
+    assert content[3] == {"type": "text", "text": "Figure F1, from tlv1117, chunk 2"}
+    assert content[4]["type"] == "image_url"
 
 
 def test_query_lists_the_figures_the_model_saw(client):
@@ -365,8 +368,8 @@ def test_query_defaults_come_from_settings(client, backend):
     assert body["usage"]["chunks_used"] == body["num_chunks"]
     assert body["usage"]["prompt_images"] <= GENERATION_MAX_IMAGES
 
-    prompt = backend.prompts[0][0].content[0]["text"]
-    assert "--- Chunk 2 ---" in prompt
+    prompt = "\n".join(part["text"] for part in backend.prompts[0][1].content if part["type"] == "text")
+    assert "[Chunk 2] Document:" in prompt
 
 
 def test_query_llm_failure_is_502(client, backend):
@@ -494,7 +497,7 @@ def test_query_with_text_only_model_gets_no_figures(client, backend):
     response = client.post("/v1/query", json={"query": "LM317 pins", "top_k": 2, "llm": _llm()})
     assert response.status_code == 200
     assert response.json()["usage"]["prompt_images"] == 0
-    assert [part["type"] for part in backend.prompts[0][0].content] == ["text"]
+    assert {part["type"] for part in backend.prompts[0][1].content} == {"text"}
     assert response.json()["total_images"] == 1, "the response still lists the chunk's figure URL"
     assert response.json()["figures"] == [], "but no figure was sent to the model"
 
