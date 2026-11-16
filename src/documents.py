@@ -1,12 +1,8 @@
 """Read a stored chunk's original text, tables and figures from its metadata.
 
 A chunk's ``page_content`` is its summary; its ``metadata`` holds the original
-content. Two metadata layouts are read:
-
-* figures as files: ``raw_text``, ``tables_html`` and ``image_paths`` (JSON
-  strings of paths under ``IMAGES_DIR``);
-* figures inline: ``original_content`` holding ``raw_text``, ``tables_html``
-  and ``images_base64``.
+content: ``raw_text``, and ``tables_html`` and ``image_paths`` as JSON strings.
+Figures are files under ``IMAGES_DIR``; ``image_paths`` lists them in order.
 
 Functions:
 
@@ -46,15 +42,6 @@ def _parse_json_value(raw: Any, default: Any) -> Any:
     return raw if raw is not None else default
 
 
-def _nested_content(metadata: dict) -> dict | None:
-    """Return the parsed ``original_content`` dict, or None when figures are files."""
-    raw = metadata.get("original_content")
-    if raw is None:
-        return None
-    parsed = _parse_json_value(raw, {})
-    return parsed if isinstance(parsed, dict) else None
-
-
 def chunk_text_and_tables(chunk: Document) -> dict:
     """Return a chunk's original text and tables without reading its figures.
 
@@ -65,22 +52,15 @@ def chunk_text_and_tables(chunk: Document) -> dict:
         Dict with ``raw_text`` (str) and ``tables_html`` (list[str]).
     """
     metadata = chunk.metadata or {}
-    source = _nested_content(metadata)
-    if source is None:
-        source = metadata
     return {
-        "raw_text": source.get("raw_text", ""),
-        "tables_html": _parse_json_value(source.get("tables_html"), []),
+        "raw_text": metadata.get("raw_text", ""),
+        "tables_html": _parse_json_value(metadata.get("tables_html"), []),
     }
 
 
 def stored_image_count(chunk: Document) -> int:
-    """Count a chunk's figures, files or inline, without reading any."""
-    metadata = chunk.metadata or {}
-    nested = _nested_content(metadata)
-    if nested is not None:
-        return len(nested.get("images_base64") or [])
-    return len(stored_image_paths(metadata))
+    """Count a chunk's figures without reading any."""
+    return len(stored_image_paths(chunk.metadata or {}))
 
 
 def extract_original_data(chunk: Document) -> dict:
@@ -95,21 +75,12 @@ def extract_original_data(chunk: Document) -> dict:
     Returns:
         Dict with ``raw_text``, ``tables_html`` and ``images_base64`` keys.
     """
-    metadata = chunk.metadata or {}
-    nested = _nested_content(metadata)
-    if nested is not None:
-        images_base64 = nested.get("images_base64", [])
-    else:
-        # Figures are files; the metadata holds their paths.
-        images_base64 = [
-            _read_image_as_base64(path)
-            for path in _parse_json_value(metadata.get("image_paths"), [])
-        ]
+    images_base64 = [_read_image_as_base64(path) for path in stored_image_paths(chunk.metadata or {})]
     return {**chunk_text_and_tables(chunk), "images_base64": images_base64}
 
 
 def stored_image_paths(metadata: dict) -> list[str]:
-    """Return a record's figure paths in stored order; empty for inline figures."""
+    """Return a record's figure paths in stored order."""
     paths = _parse_json_value(metadata.get("image_paths"), [])
     return [str(path) for path in paths] if isinstance(paths, list) else []
 

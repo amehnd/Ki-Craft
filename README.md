@@ -348,14 +348,12 @@ Ingestion is not needed to use the five documents that ship with the repository.
 - It calls the vision model once per chunk through the Hugging Face router, which needs `HF_TOKEN` and available credit on that account.
 - It calls watsonx once per chunk for the embedding.
 - It writes to the tracked store in `dbv2/chroma_db`, so it changes files that git tracks.
-- There are two ways to build the store today, and they store figures differently. The shipped store was built the second way.
+- There are two entry points. Both store records the same way (`src/ingestion/pipeline.py:documents_from_export`): each figure becomes a file in `dbv2/images`, and the record holds its path and a `source` name.
 
-| Script | Input | What it stores |
+| Script | Input | What it does |
 |---|---|---|
-| `python -m scripts.ingest` | a PDF | Parses, chunks, summarises, writes `chunks_huggingface.json` in the repository root, and adds records that keep the figures as base64 inside Chroma |
-| `python -m scripts.ingest_colab` | the JSON exports in `json/` | Embeds the existing summaries, writes each figure to `dbv2/images`, and adds records that hold the figure paths and a `source` name |
-
-The query path reads both shapes (`src/documents.py`).
+| `python -m scripts.ingest` | one PDF | Parses, chunks, summarises, writes the export to `json/<pdf name>.json`, then stores the records. It stops if that export already exists, so a document is not added twice |
+| `python -m scripts.ingest_colab` | the JSON exports in `json/` | Embeds the existing summaries and stores the records, with no summarising |
 
 PDF parsing needs system packages:
 
@@ -374,8 +372,6 @@ Run the pipeline on one PDF:
 ```bash
 python -m scripts.ingest path/to/document.pdf
 ```
-
-With no argument it uses `data/datasheet.pdf`.
 
 Uploading a PDF through the API, with a hosted parser in production, is the goal of Checkpoint 7 in [AGENTS.md](AGENTS.md).
 

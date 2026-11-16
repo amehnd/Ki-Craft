@@ -130,7 +130,7 @@ class ChunkPayload(BaseModel):
     Figures are not inline: ``image_urls`` lists one stable URL per figure,
     ``/v1/images/{record_id}/{position}``, built from the chunk's Chroma
     record id and the figure's 0-based position within the chunk.
-    ``image_count`` counts those URLs; figures stored inline have none.
+    ``image_count`` counts those URLs.
     """
 
     chunk_id: int = Field(..., description="1-based position in this response")

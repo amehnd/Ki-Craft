@@ -13,7 +13,11 @@ from src.ingestion.enrich import (
 )
 from src.ingestion.export import export_chunks_to_json
 from src.ingestion.extract import partition_document
-from src.ingestion.pipeline import create_vector_store, run_complete_ingestion_pipeline
+from src.ingestion.pipeline import (
+    create_vector_store,
+    documents_from_export,
+    run_complete_ingestion_pipeline,
+)
 
 __all__ = [
     "partition_document",
@@ -22,6 +26,7 @@ __all__ = [
     "create_ai_enhanced_summary",
     "summarise_chunks",
     "export_chunks_to_json",
+    "documents_from_export",
     "create_vector_store",
     "run_complete_ingestion_pipeline",
 ]

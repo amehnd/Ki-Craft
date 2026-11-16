@@ -104,14 +104,37 @@ def test_trace_inputs_keep_the_question_and_drop_objects():
     assert recorded == {"question": "LM555 pins?", "max_images": 0, "send_images": True, "num_chunks": 2}
 
 
+@pytest.fixture(autouse=True)
+def _figures_root(monkeypatch, tmp_path):
+    """Figure paths resolve under ``tmp_path``, so no test reads ``dbv2/images``."""
+    import src.documents
+
+    (tmp_path / "dbv2" / "images").mkdir(parents=True)
+    monkeypatch.setattr(src.documents, "_PROJECT_ROOT", tmp_path)
+    return tmp_path
+
+
 def _chunk(summary: str, images: list[str]) -> Document:
-    """A chunk in the nested schema with the given base64 images."""
+    """A stored chunk whose figure files hold the given strings as bytes."""
     import json
 
+    import src.documents
+
+    paths = []
+    for name in images:
+        path = f"dbv2/images/{name}.jpg"
+        (src.documents._PROJECT_ROOT / path).write_bytes(name.encode())
+        paths.append(path)
     return Document(
         page_content=summary,
-        metadata={"original_content": json.dumps({"raw_text": "", "tables_html": [], "images_base64": images})},
+        metadata={"raw_text": "", "tables_html": "[]", "image_paths": json.dumps(paths)},
     )
+
+
+def _b64(text: str) -> str:
+    import base64
+
+    return base64.b64encode(text.encode()).decode()
 
 
 def test_every_retrieved_chunk_reaches_the_prompt():
@@ -126,7 +149,7 @@ def test_image_cap_takes_images_in_chunk_order():
     """Chunk 1's images come first, then chunk 2's, until the cap."""
     chunks = [_chunk("a", ["A1", "A2"]), _chunk("b", ["B1", "B2"]), _chunk("c", ["C1"])]
     urls = [block["image_url"]["url"] for block in _collect_images(chunks, 3)]
-    assert urls == [f"data:image/jpeg;base64,{x}" for x in ("A1", "A2", "B1")]
+    assert urls == [f"data:image/jpeg;base64,{_b64(x)}" for x in ("A1", "A2", "B1")]
 
 
 def test_image_cap_zero_sends_every_image():

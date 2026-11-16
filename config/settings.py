@@ -64,6 +64,8 @@ GENERATION_MODEL: str = "gemini-3.5-flash-lite"
 # ---------------------------------------------------------------------------
 CHROMA_PERSIST_DIR: str = "dbv2/chroma_db"
 IMAGES_DIR: str = "dbv2/images"
+# One chunk export per ingested document, <source>.json.
+JSON_EXPORT_DIR: str = "json"
 
 # ---------------------------------------------------------------------------
 # Retrieval settings

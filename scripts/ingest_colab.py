@@ -1,9 +1,8 @@
 """Colab-oriented ingestion for pre-exported JSON chunk files.
 
-Reads ``chunks_export.json``-style files from a directory and ingests them
-into ChromaDB.  Unlike the main pipeline this variant saves images as
-separate files (referenced by path in metadata) to avoid bloating the vector
-store, and flattens the original content onto the metadata dict directly.
+Reads chunk exports (``<source>.json``) from a directory and ingests them into
+ChromaDB, through the same :func:`src.ingestion.pipeline.documents_from_export`
+as ``scripts/ingest.py``: figures become files, metadata is flat.
 
 Paths default to Colab-friendly relatives (``../json``, ``../dbv2/...``).
 
@@ -13,7 +12,6 @@ Usage:
 
 from __future__ import annotations
 
-import base64
 import json
 import os
 import sys
@@ -27,6 +25,7 @@ from langchain_core.documents import Document
 
 from config.settings import CHROMA_COLLECTION_METADATA, EMBEDDING_MODEL
 from src.embed import load_embedding_model
+from src.ingestion.pipeline import documents_from_export
 from src.logger import get_logger
 
 logger = get_logger(__name__)
@@ -39,8 +38,8 @@ def ingest_json_directory(
 ) -> Chroma:
     """Read JSON chunk files from a directory and ingest them into ChromaDB.
 
-    Images are decoded from base64 and saved as separate files on disk; the
-    metadata stores their paths plus the raw text and tables.
+    Figures are written as files under ``images_directory``; see
+    :func:`src.ingestion.pipeline.documents_from_export`.
 
     Args:
         json_directory: Folder containing the exported JSON files.
@@ -72,54 +71,16 @@ def ingest_json_directory(
     logger.info("  Found %d JSON files", len(json_files))
 
     documents: list[Document] = []
-    total_images = 0
-    total_tables = 0
-    total_raw_chars = 0
-
     for json_file in json_files:
         logger.info("  Processing: %s", json_file.name)
-
         with open(json_file, "r", encoding="utf-8") as f:
-            chunks = json.load(f)
+            export = json.load(f)
+        logger.info("    Chunks in file: %d", len(export))
+        documents.extend(documents_from_export(export, json_file.stem, images_dir))
 
-        logger.info("    Chunks in file: %d", len(chunks))
-
-        for chunk in chunks:
-            original = chunk["metadata"]["original_content"]
-            source_stem = json_file.stem
-            chunk_id = chunk["chunk_id"]
-
-            images_b64 = original.get("images_base64", [])
-            tables = original.get("tables_html", [])
-            raw_text = original.get("raw_text", "")
-
-            image_paths = []
-            for idx, b64 in enumerate(images_b64):
-                img_filename = f"{source_stem}_c{chunk_id}_img{idx}.jpg"
-                img_path = images_dir / img_filename
-                img_path.write_bytes(base64.b64decode(b64))
-                image_paths.append(str(img_path))
-
-            total_images += len(images_b64)
-            total_tables += len(tables)
-            total_raw_chars += len(raw_text)
-
-            metadata = {
-                "source": json_file.stem,
-                "chunk_id": chunk_id,
-                "raw_text": raw_text,
-                "tables_html": json.dumps(tables, ensure_ascii=False),
-                "image_paths": json.dumps(image_paths, ensure_ascii=False),
-                "has_table": len(tables) > 0,
-                "has_image": len(images_b64) > 0,
-            }
-
-            documents.append(
-                Document(
-                    page_content=chunk["enhanced_content"],
-                    metadata=metadata,
-                )
-            )
+    total_images = sum(len(json.loads(d.metadata["image_paths"])) for d in documents)
+    total_tables = sum(len(json.loads(d.metadata["tables_html"])) for d in documents)
+    total_raw_chars = sum(len(d.metadata["raw_text"]) for d in documents)
 
     logger.info("  Document summary:")
     logger.info("    Total chunks: %d", len(documents))

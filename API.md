@@ -259,11 +259,6 @@ can load them.
   the store; a `record_id` that is not a UUID or a negative `position` is a
   `422`, and an unknown record or position is a `404`.
 
-- **Figures stored inline have no URL.** A document ingested with
-  `scripts/ingest.py` stores its figures as base64 inside the store. They get
-  no URL and are not counted in `image_count` until ingestion writes figure
-  files (planned). The model still sees them.
-
 - **Handle image load errors.** Show a broken-image fallback on a `404`.
 
 - **`raw_text` and `enhanced_content` are different.** `enhanced_content` is

@@ -18,7 +18,6 @@ touches ``dbv2/`` or the network.
 
 from __future__ import annotations
 
-import base64
 import json
 import logging
 
@@ -45,26 +44,18 @@ ESCAPING_ID = "33333333-3333-4333-8333-333333333333"
 
 
 def _fake_chunks() -> list[Document]:
-    """Two chunks, one per metadata schema that ``src/documents.py`` reads.
-
-    The nested chunk keeps its figure inline as base64, so it gets no URL;
-    the flattened one points at a file under the test's ``dbv2/images``.
-    """
-    nested = Document(
+    """Two stored chunks: one with a table and no figure, one with a figure file."""
+    lm317 = Document(
         id=LM317_ID,
         page_content="LM317 summary: adjustable regulator with ADJ, VOUT, VIN pins.",
         metadata={
             "source": "lm317",
-            "original_content": json.dumps(
-                {
-                    "raw_text": "Pin 1 ADJ, pin 2 VOUT, pin 3 VIN.",
-                    "tables_html": ["<table><tr><td>ADJ</td></tr></table>"],
-                    "images_base64": [base64.b64encode(JPEG_BYTES).decode()],
-                }
-            ),
+            "raw_text": "Pin 1 ADJ, pin 2 VOUT, pin 3 VIN.",
+            "tables_html": json.dumps(["<table><tr><td>ADJ</td></tr></table>"]),
+            "image_paths": "[]",
         },
     )
-    flat = Document(
+    tlv1117 = Document(
         id=TLV1117_ID,
         page_content="TLV1117 summary: fixed 3.3 V LDO.",
         metadata={
@@ -74,7 +65,7 @@ def _fake_chunks() -> list[Document]:
             "image_paths": json.dumps(["dbv2/images/tlv1117_c1_img0.jpg"]),
         },
     )
-    return [nested, flat]
+    return [lm317, tlv1117]
 
 
 class _FakeRetriever:
@@ -257,7 +248,7 @@ def test_retrieve_returns_chunks_with_tables_and_images(client):
 
     assert body["query"] == "LM317 pins"
     assert body["num_chunks"] == 2
-    assert body["total_images"] == 1, "only figures with a URL are counted"
+    assert body["total_images"] == 1
     assert body["total_tables"] == 1
     assert "response_id" not in body
 
@@ -268,7 +259,7 @@ def test_retrieve_returns_chunks_with_tables_and_images(client):
     assert first["has_table"] and not first["has_image"]
     assert first["record_id"] == LM317_ID
     assert "images_base64" not in first
-    assert first["image_urls"] == [], "a figure stored inline has no URL"
+    assert first["image_urls"] == []
     assert "original_content" not in first["metadata"]
     assert second["record_id"] == TLV1117_ID
     assert second["has_image"]
@@ -310,7 +301,7 @@ def test_image_url_is_stable_across_restarts(backend):
 def test_unknown_image_is_404(client):
     assert client.get(f"/v1/images/{TLV1117_ID}/1").status_code == 404, "no second figure"
     assert client.get("/v1/images/99999999-9999-4999-8999-999999999999/0").status_code == 404
-    assert client.get(f"/v1/images/{LM317_ID}/0").status_code == 404, "inline figures have no file"
+    assert client.get(f"/v1/images/{LM317_ID}/0").status_code == 404, "a chunk without figures"
 
 
 def test_image_url_must_name_a_record_and_position(client):
@@ -339,7 +330,7 @@ def test_query_returns_answer_and_usage(client, backend):
     assert body["answer_characters"] == len("Hello world")
     assert body["num_chunks"] == 2
     assert body["usage"]["input_tokens"] == 10
-    assert body["usage"]["prompt_images"] == 2
+    assert body["usage"]["prompt_images"] == 1
 
     content = backend.prompts[0][0].content
     assert "QUESTION: LM317 pins" in content[0]["text"]

@@ -38,7 +38,7 @@ logger = get_logger(__name__)
 
 # Metadata keys that are excluded from the API payload's ``metadata`` dict to
 # keep responses small (the full content is exposed via dedicated fields).
-_EXCLUDED_META_KEYS = {"original_content", "raw_text", "tables_html", "images_base64", "image_paths"}
+_EXCLUDED_META_KEYS = {"raw_text", "tables_html", "image_paths"}
 
 
 class StoreUnavailableError(RuntimeError):

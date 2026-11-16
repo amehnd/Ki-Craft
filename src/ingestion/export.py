@@ -1,7 +1,9 @@
 """Export processed chunks to JSON.
 
-Writes the enriched documents to disk in a compact, inspectable format for
-debugging ingestion output without needing to query the vector store.
+Writes the summarised chunks to ``<source>.json``: each chunk's summary and its
+original text, tables and figures (base64). The export can rebuild the store
+without summarising again (``scripts/ingest_colab.py``) and is what the
+dashboard's dataset browser shows.
 """
 
 from __future__ import annotations
