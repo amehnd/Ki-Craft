@@ -179,23 +179,13 @@ EVAL_METRICS: list[tuple[str, str, str]] = [
 ]
 
 DATASET_LABELS: dict[str, str] = {
-    "AN699chunks.json": "AN699",
-    "LM555TImer.json": "LM555 Timer",
-    "lm2596chunks.json": "LM2596",
-    "lm317chunks.json": "LM317",
-    "tlv1117.pdfchunks_export.json": "TLV1117",
+    "lm555.json": "LM555 Timer",
 }
 
 
 def _dataset_display_name(filename: str) -> str:
-    """Human-friendly label for a chunk export file."""
-    if filename in DATASET_LABELS:
-        return DATASET_LABELS[filename]
-    stem = Path(filename).stem
-    for suffix in ("chunks_export", "chunks", "export"):
-        if stem.endswith(suffix):
-            stem = stem[: -len(suffix)]
-    return (stem.strip("._-") or stem).upper()
+    """Human-friendly label for a chunk export file: its document name, upper case."""
+    return DATASET_LABELS.get(filename) or Path(filename).stem.upper()
 
 
 def _asset(name: str) -> str:

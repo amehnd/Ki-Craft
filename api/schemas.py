@@ -180,7 +180,7 @@ class ChunkPayload(BaseModel):
                 ],
                 "has_table": True,
                 "has_image": True,
-                "source": "lm317_datasheet.pdf",
+                "source": "lm317",
                 "metadata": {"has_table": True, "has_image": True},
             }
         }
@@ -217,7 +217,7 @@ class RetrieveResponse(BaseModel):
                         ],
                         "has_table": True,
                         "has_image": True,
-                        "source": "lm317_datasheet.pdf",
+                        "source": "lm317",
                         "metadata": {"has_table": True, "has_image": True},
                     }
                 ],

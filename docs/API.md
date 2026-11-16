@@ -126,7 +126,7 @@ minus `answer`, `answer_characters` and `figures`):
   "answer_characters": 1086,       // /v1/query only
   "figures": [                     // /v1/query only: the figures the model saw
     {"label": "F1", "url": "/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0",
-     "chunk_id": 1, "source": "lm317_datasheet.pdf"}
+     "chunk_id": 1, "source": "lm317"}
   ],
   "chunks": [
     {
@@ -140,7 +140,7 @@ minus `answer`, `answer_characters` and `figures`):
                      "/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/1"],
       "has_table": true,
       "has_image": true,
-      "source": "lm317_datasheet.pdf",
+      "source": "lm317",
       "metadata": { }
     }
   ]
