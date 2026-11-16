@@ -95,15 +95,26 @@ def query(
     return _absolutize_image_urls(response.json())
 
 
-def stream(query: str, top_k: int = 5) -> Iterator[tuple[str, dict]]:
-    """Stream SSE events from ``/v1/query/stream``.
+def stream(
+    query: str,
+    top_k: int = 5,
+    max_images: int | None = None,
+    llm: dict | None = None,
+) -> Iterator[tuple[str, dict]]:
+    """Stream SSE events for the same question and model options as :func:`query`.
 
     Yields ``(event, data)`` pairs where ``event`` is one of
     ``retrieval``, ``token``, ``done`` or ``error``.
+    Raises ``requests.HTTPError`` for failures before the stream starts.
     """
-    with requests.get(
+    body: dict = {"query": query, "top_k": top_k}
+    if max_images is not None:
+        body["max_images"] = max_images
+    if llm is not None:
+        body["llm"] = llm
+    with requests.post(
         _url("/v1/query/stream"),
-        params={"query": query, "top_k": top_k},
+        json=body,
         stream=True,
         timeout=_REQUEST_TIMEOUT,
     ) as response:

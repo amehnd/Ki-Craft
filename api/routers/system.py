@@ -24,7 +24,7 @@ def root(request: Request) -> dict:
         "endpoints": {
             "POST /v1/retrieve": "Retrieve chunks only (text, tables, images)",
             "POST /v1/query": "Retrieve chunks and generate a full answer; an optional llm object picks the model",
-            "GET /v1/query/stream": "SSE stream of the answer with retrieval summary",
+            "POST /v1/query/stream": "SSE stream of the answer with the same request body as /v1/query",
             "GET /v1/images/{record_id}/{position}": "Fetch one figure of a stored chunk (stable URL)",
             "GET /health": "Service health / vector store status",
         },

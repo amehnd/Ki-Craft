@@ -112,11 +112,6 @@ QUERY_BODY_EXAMPLES = {
     },
 }
 
-QUERY_PARAM_EXAMPLES = [
-    "Tell me about the pin configuration of the LM2596.",
-    "Tell me about the pin configuration of the LM317.",
-]
-
 RICH_DESCRIPTION_COMMON = """
 Ask a question about the indexed PDFs. The service:
 

@@ -1606,7 +1606,11 @@ def render_chat_page() -> None:
 
             else:
                 # Default backend mode - use streaming
-                events = api_stream(query, top_k=st.session_state.get("llm_top_k", 5))
+                events = api_stream(
+                    query,
+                    top_k=st.session_state.get("llm_top_k", 5),
+                    max_images=st.session_state.get("llm_max_images"),
+                )
                 status = st.status("Retrieving relevant chunks ...", expanded=True)
                 answer_placeholder = st.empty()
                 collected: list[str] = []

@@ -14,7 +14,7 @@ Every query, with the default model or a caller-chosen one, goes through
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
+from collections.abc import Generator
 from pathlib import Path
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -106,7 +106,7 @@ class RAGService:
         llm: BaseChatModel | None = None,
         provider_id: str | None = None,
         model_id: str | None = None,
-    ) -> Iterator[StreamEvent]:
+    ) -> Generator[StreamEvent, None, None]:
         """Retrieve chunks and return the answer as a stream of events.
 
         Blocking: call it from a worker thread, after ``ensure_ready``. This is

@@ -104,6 +104,7 @@ class FakeBackend:
     def __init__(self):
         self.store_error: str | None = None
         self.llm_error: str | None = None
+        self.llm_error_after_first_token: str | None = None
         self.finish_reason: str | None = None
         self.prompts: list = []
         self.client_kwargs: list[dict] = []
@@ -143,6 +144,8 @@ class _FakeLLM:
             )
             return
         yield AIMessageChunk(content="Hello")
+        if self._backend.llm_error_after_first_token:
+            raise RuntimeError(self._backend.llm_error_after_first_token)
         yield AIMessageChunk(
             content=" world",
             usage_metadata={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
@@ -204,6 +207,7 @@ def test_root_lists_endpoints(client):
     body = client.get("/").json()
     assert body["docs"] == "/docs"
     assert "POST /v1/query" in body["endpoints"]
+    assert "POST /v1/query/stream" in body["endpoints"]
 
 
 def test_api_is_versioned_but_root_and_health_are_not(client):
@@ -359,10 +363,11 @@ def test_query_llm_failure_is_502(client, backend):
 
 
 @pytest.mark.parametrize("finish_reason", ["length", "MAX_TOKENS"])
-def test_answer_cut_off_before_any_text_is_502(client, backend, finish_reason):
+@pytest.mark.parametrize("path", ["/v1/query", "/v1/query/stream"])
+def test_answer_cut_off_before_any_text_is_502(client, backend, finish_reason, path):
     """OpenAI-style and Gemini names for "stopped at max_tokens" both count."""
     backend.finish_reason = finish_reason
-    response = client.post("/v1/query", json={"query": "LM317 pins", "top_k": 2})
+    response = client.post(path, json={"query": "LM317 pins", "top_k": 2})
     assert response.status_code == 502
     assert "whole output budget (512 tokens" in response.json()["detail"]
     assert "Raise max_tokens" in response.json()["detail"]
@@ -389,7 +394,7 @@ def test_unexpected_error_is_500_without_internals(backend, monkeypatch):
 
 
 def test_stream_emits_retrieval_tokens_done(client):
-    response = client.get("/v1/query/stream", params={"query": "LM317 pins", "top_k": 2})
+    response = client.post("/v1/query/stream", json={"query": "LM317 pins", "top_k": 2})
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
 
@@ -404,17 +409,46 @@ def test_stream_emits_retrieval_tokens_done(client):
 
 
 def test_stream_reports_llm_failure_as_error_event(client, backend):
-    """Headers are already sent, so a mid-stream failure is an ``error`` event."""
-    backend.llm_error = "quota exceeded"
-    response = client.get("/v1/query/stream", params={"query": "LM317 pins", "top_k": 2})
+    """A provider failure after the first token ends the stream with an error."""
+    backend.llm_error_after_first_token = "quota exceeded"
+    response = client.post("/v1/query/stream", json={"query": "LM317 pins", "top_k": 2})
+    assert response.status_code == 200
     events = _parse_sse(response.text)
-    assert [name for name, _ in events] == ["retrieval", "error"]
-    assert events[-1][1] == {"message": "The model provider failed: quota exceeded"}
+    assert [name for name, _ in events] == ["retrieval", "token", "error"]
+    assert events[-1][1] == {"status": 502, "message": "The model provider failed: quota exceeded"}
+
+
+def test_stream_provider_failure_before_first_token_is_502(client, backend):
+    backend.llm_error = "quota exceeded"
+    response = client.post("/v1/query/stream", json={"query": "LM317 pins", "top_k": 2})
+    assert response.status_code == 502
+    assert response.json() == {"detail": "The model provider failed: quota exceeded"}
+
+
+def test_stream_replaces_get_and_documents_the_shared_body(client):
+    assert client.get("/v1/query/stream", params={"query": "x"}).status_code == 405
+    paths = client.get("/openapi.json").json()["paths"]
+    stream = paths["/v1/query/stream"]["post"]
+    assert stream["requestBody"] == paths["/v1/query"]["post"]["requestBody"]
+    assert set(stream["responses"]["200"]["content"]) == {"text/event-stream"}
+
+
+def test_stream_uses_requested_llm_and_body_options(client, backend):
+    response = client.post(
+        "/v1/query/stream",
+        json={"query": "LM317 pins", "top_k": 1, "max_images": 0, "llm": _llm(max_tokens=720)},
+    )
+    assert response.status_code == 200
+    events = _parse_sse(response.text)
+    assert events[0][1]["num_chunks"] == 1
+    assert events[-1][1]["usage"]["model"] == "openai/gpt-oss-20b"
+    assert backend.client_kwargs[-1]["api_key"] == "test-key"
+    assert backend.client_kwargs[-1]["max_tokens"] == 720
 
 
 def test_stream_with_broken_store_is_503(client, backend):
     backend.store_error = "store missing"
-    response = client.get("/v1/query/stream", params={"query": "LM317 pins"})
+    response = client.post("/v1/query/stream", json={"query": "LM317 pins"})
     assert response.status_code == 503
 
 
@@ -464,11 +498,12 @@ def test_llm_without_api_key_is_422(client, backend):
     assert backend.prompts == []
 
 
-def test_validation_error_does_not_echo_the_key(client):
+@pytest.mark.parametrize("path", ["/v1/query", "/v1/query/stream"])
+def test_validation_error_does_not_echo_the_key(client, path):
     """A missing ``llm.model`` would echo the whole ``llm`` object as ``input``."""
     llm = _llm(api_key="sk-must-not-leak")
     del llm["model"]
-    response = client.post("/v1/query", json={"query": "x", "llm": llm})
+    response = client.post(path, json={"query": "x", "llm": llm})
     assert response.status_code == 422
     error = response.json()["detail"][0]
     assert error["loc"] == ["body", "llm", "model"]
@@ -476,10 +511,11 @@ def test_validation_error_does_not_echo_the_key(client):
     assert "sk-must-not-leak" not in response.text
 
 
-def test_query_unknown_model_is_422(client, backend):
+@pytest.mark.parametrize("path", ["/v1/query", "/v1/query/stream"])
+def test_query_unknown_model_is_422(client, backend, path):
     """An unknown model is the caller's mistake, rejected before retrieval."""
     response = client.post(
-        "/v1/query", json={"query": "x", "llm": _llm(provider="gemini", model="no-such-model")}
+        path, json={"query": "x", "llm": _llm(provider="gemini", model="no-such-model")}
     )
     assert response.status_code == 422
     assert response.json() == {"detail": "Model no-such-model not found for provider gemini"}

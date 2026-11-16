@@ -232,7 +232,7 @@ Interactive documentation is at http://127.0.0.1:8001/docs.
 | GET | `/health` | Reports whether the vector store loaded |
 | POST | `/v1/retrieve` | Returns the retrieved chunks, with no LLM call |
 | POST | `/v1/query` | Retrieves, then answers with the default model, or with the provider, model and key in an optional `llm` object |
-| GET | `/v1/query/stream` | The same, streamed token by token over Server-Sent Events |
+| POST | `/v1/query/stream` | The same, streamed token by token over Server-Sent Events |
 | GET | `/v1/images/{record_id}/{position}` | Serves one figure of a stored chunk, at a stable URL |
 
 Retrieve chunks only:
@@ -256,7 +256,7 @@ curl -X POST http://127.0.0.1:8001/v1/query -H 'Content-Type: application/json' 
 Stream an answer:
 
 ```bash
-curl -N --get http://127.0.0.1:8001/v1/query/stream --data-urlencode 'query=What is the output voltage range of the LM317?'
+curl -N http://127.0.0.1:8001/v1/query/stream -H 'Content-Type: application/json' -d '{"query": "What is the output voltage range of the LM317?"}'
 ```
 
 The full request and response shapes are in [API.md](API.md).

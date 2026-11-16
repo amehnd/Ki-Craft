@@ -27,13 +27,13 @@ supporting evidence: the exact document chunks, their tables, and their figures.
 | `/health` | GET | Is the service up? | `{status: "ok", vector_store: "loaded"}`, or **503** when the store cannot load |
 | `/v1/retrieve` | POST | Get evidence **without** an answer | `RetrieveResponse` |
 | `/v1/query` | POST | Get evidence **and** a full answer | `QueryResponse` |
-| `/v1/query/stream` | GET | Same as `/v1/query` but token-by-token (SSE) | Server-Sent Events |
+| `/v1/query/stream` | POST | Same body as `/v1/query`, with a streamed answer | Server-Sent Events |
 | `/v1/images/{record_id}/{position}` | GET | Fetch one figure as an image (stable URL) | raw JPEG bytes |
 | `/docs` | GET | Swagger UI (try-it-out docs) | HTML |
 
 There are only **three shapes** you need to understand:
 
-1. **Request** — `{"query": "...", "top_k": 5, "max_images": 3}` (`top_k` and `max_images` optional), plus an optional `llm` object on `/v1/query` to pick the model.
+1. **Request** — `{"query": "...", "top_k": 5, "max_images": 3}` (`top_k` and `max_images` optional), plus an optional `llm` object on both query endpoints to pick the model.
 2. **`RetrieveResponse`** — the chunks + everything they contain.
 3. **`QueryResponse`** — the same, plus `answer` and `answer_characters`.
 
@@ -56,8 +56,8 @@ so an uptime probe can rely on the status code alone.
 
 ## 2. The request
 
-`/v1/retrieve` and `/v1/query` take the same JSON body, and `/v1/query` also
-takes an optional `llm` object:
+`/v1/retrieve`, `/v1/query`, and `/v1/query/stream` accept the fields below.
+Both query endpoints also accept an optional `llm` object.
 
 ```json
 {
@@ -77,7 +77,7 @@ Start with the defaults; raise `top_k` if answers miss context, and raise
 `max_images` (or set 0) for questions about graphs and diagrams.
 `/v1/retrieve` never calls a model, so it ignores `max_images`.
 
-### Choosing the model (`llm`, `/v1/query` only)
+### Choosing the model (`llm`)
 
 Leave `llm` out and the server's default model (Gemini 3.5 Flash-Lite) answers
 with the server's own key. Send it to answer with another catalogued model and
@@ -106,9 +106,8 @@ with the server's own key. Send it to answer with another catalogued model and
 | `temperature` | number | 0–2, default 0 | Not sent to models that reject or ignore it (Gemini 3.5 Flash-Lite and 3.6 Flash, OpenAI o-series and GPT-5.4) |
 | `max_tokens` | integer | 1–8192, optional | Output budget, reasoning included. Left out, the catalogue default applies: 2048 for models that reason by default, 512 otherwise |
 
-`/docs` has a ready body for Gemini, Groq GPT-OSS, OpenAI GPT-4o mini and the
-Hugging Face router. The streaming route takes `llm` too from commit 6e, when
-it becomes `POST /v1/query/stream`.
+`/docs` has request examples for Gemini, Groq GPT-OSS, OpenAI GPT-4o mini and
+the Hugging Face router on both query endpoints.
 
 ---
 
@@ -175,40 +174,32 @@ once.
 
 ## 4. Streaming the answer (`/v1/query/stream`)
 
-`GET /v1/query/stream?query=...&top_k=5` is the same as `/v1/query` but the answer
-arrives as you type it. It's a standard **Server-Sent Events** stream
-(`Content-Type: text/event-stream`), so in the browser you can use
-`EventSource` directly — no library needed.
-
-Because it's a GET, put the parameters in the **query string** and URL-encode:
-`/v1/query/stream?query=Tell%20me%20about%20the%20pin%20configuration%20of%20the%20LM317.`
-
-Event flow, in order:
+`POST /v1/query/stream` takes the same JSON body as `POST /v1/query`. The
+response uses **[Server-Sent Events](docs/GLOSSARY.md#api-and-serving)**
+(`Content-Type: text/event-stream`). The server waits for the first answer
+fragment before sending the response headers.
 
 | Event | `data` payload | When |
 |---|---|---|
-| `retrieval` | a full `RetrieveResponse` (the chunks) | immediately, once |
+| `retrieval` | a full `RetrieveResponse` (the chunks) | first, once the first answer fragment is ready |
 | `token` | `{"delta": "The "}` | many times, one fragment of the answer each |
 | `done` | `{"answer": "...", "answer_characters": 1086, "num_chunks": 2, "usage": {...}}` | after the last token |
-| `error` | `{"message": "..."}` | only if something fails after the stream started; `message` is the same text an error `detail` would carry |
+| `error` | `{"status": 502, "message": "..."}` | replaces `done` if the provider fails after the stream starts. Unexpected server errors carry `status: 500` |
 
-```js
-const es = new EventSource(
-  `${BASE}/v1/query/stream?query=${encodeURIComponent("Tell me about the pin configuration of the LM317.")}&top_k=5`
-);
-es.addEventListener("retrieval", (e) => renderChunks(JSON.parse(e.data)));
-es.addEventListener("token", (e) => appendToAnswer(JSON.parse(e.data).delta));
-es.addEventListener("done", (e) => { es.close(); /* JSON.parse(e.data).answer is final */ });
-es.addEventListener("error", (e) => console.error("stream failed", e));
+```bash
+curl -N http://localhost:8000/v1/query/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "Tell me about the pin configuration of the LM317.", "top_k": 5}'
 ```
 
-Tip: build your answer by concatenating all `delta`s; the `done` event gives you
-the authoritative final string.
+In a browser, use `fetch` with `method: "POST"`. Check the HTTP status before
+reading `response.body`. Decode the body as text and buffer partial frames
+until the blank line that ends each event. Append each `token` event's
+`delta` to the displayed answer and use `done.answer` as the final text.
 
-The status is 200 as soon as the stream starts, so a failing model provider
-shows up as an `error` event, not a 502. Only a store failure, which happens
-before the stream starts, is a real `503`. (Planned: `POST /v1/query/stream`
-will wait for the first token, so early provider failures become a real 502.)
+Before the stream opens, a provider failure returns HTTP `502` and an
+unavailable store returns HTTP `503`. After the headers are sent the HTTP
+status stays `200`, and the `error` event carries the failure status.
 
 ---
 
@@ -298,6 +289,6 @@ can load them.
 |---|---|
 | A ready-to-display answer + evidence | `POST /v1/query` |
 | Evidence only (build your own answer elsewhere) | `POST /v1/retrieve` |
-| A typewriter/streaming answer effect | `GET /v1/query/stream` |
+| A typewriter/streaming answer effect | `POST /v1/query/stream` |
 | The figures of a response | `image_urls` → `GET /v1/images/...` |
 | Just a health/probe check | `GET /health` |

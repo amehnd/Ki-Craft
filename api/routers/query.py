@@ -1,8 +1,8 @@
 """Answer endpoints: retrieve chunks, then generate an answer from them.
 
 ``/v1/query`` returns the whole answer at once and ``/v1/query/stream`` sends
-it token by token over Server-Sent Events. ``/v1/query`` answers with the
-server's default model, or with the provider, model and API key in the body's
+it token by token over Server-Sent Events. Both use the server's default
+model, or the provider, model and API key in the body's
 optional ``llm`` object. The paths below are short; ``api/main.py`` adds the
 ``/v1`` prefix.
 """
@@ -10,22 +10,44 @@ optional ``llm`` object. The paths below are short; ``api/main.py`` adds the
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator, Generator
+from contextlib import closing
 from typing import Annotated
 
-from fastapi import APIRouter, Body, HTTPException, Query, Request
+from anyio import CancelScope
+from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from langchain_core.language_models.chat_models import BaseChatModel
+from starlette.concurrency import iterate_in_threadpool, run_in_threadpool
 
 from api.openapi_examples import (
     QUERY_BODY_EXAMPLES,
-    QUERY_PARAM_EXAMPLES,
     RICH_DESCRIPTION_COMMON,
     error_responses,
 )
-from api.schemas import QueryRequest, QueryResponse
-from config.settings import GENERATION_MAX_IMAGES, RETRIEVAL_K
-from src.llm import UnknownModelError, create_llm
+from api.schemas import LLMSettings, QueryRequest, QueryResponse
+from api.service import RAGService
+from src.llm import LLMProviderError, UnknownModelError, create_llm
+from src.logger import get_logger
 
+logger = get_logger(__name__)
 router = APIRouter(tags=["generation"])
+
+
+def _requested_llm(llm: LLMSettings | None) -> BaseChatModel | None:
+    """Build the requested model, or leave model selection to the service."""
+    if llm is None:
+        return None
+    try:
+        return create_llm(
+            llm.provider,
+            llm.model,
+            llm.api_key.get_secret_value(),
+            temperature=llm.temperature,
+            max_tokens=llm.max_tokens,
+        )
+    except UnknownModelError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post(
@@ -62,25 +84,11 @@ async def query(
         HTTPException: 422 when ``llm`` names a provider or model that is
             not in the catalogue.
     """
-    llm = None
-    if req.llm is not None:
-        try:
-            # Built before retrieval, so an unknown provider or model fails fast.
-            llm = create_llm(
-                req.llm.provider,
-                req.llm.model,
-                req.llm.api_key.get_secret_value(),
-                temperature=req.llm.temperature,
-                max_tokens=req.llm.max_tokens,
-            )
-        except UnknownModelError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
-
     answer, base, usage = await request.app.state.service.answer(
         req.query,
         req.top_k,
         req.max_images,
-        llm=llm,
+        llm=_requested_llm(req.llm),
         provider_id=req.llm.provider if req.llm else None,
         model_id=req.llm.model if req.llm else None,
     )
@@ -97,76 +105,92 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-@router.get(
-    "/query/stream",
-    summary="Stream an answer over SSE",
-    description=(
-        "Streams the answer token-by-token over Server-Sent Events. Event flow:\n\n"
-        "1. ``event: retrieval`` - full chunk payloads (like /v1/retrieve),\n"
-        "2. ``event: token``    - one per answer fragment (field ``delta``),\n"
-        "3. ``event: done``     - final answer, chunk count and usage,\n"
-        "4. ``event: error``    - only on failure (``message`` says why).\n\n"
-        "Open the URL directly in a browser to watch the stream, or consume it "
-        "with any SSE client. Works with e.g. ``curl -N``."
-    ),
-    response_description="text/event-stream of retrieval + answer tokens",
-    responses=error_responses(503),
-)
-async def query_stream(
-    request: Request,
-    query: str = Query(
-        ...,
-        min_length=1,
-        max_length=2000,
-        description="The user's question about the documents.",
-        examples=QUERY_PARAM_EXAMPLES,
-    ),
-    top_k: int = Query(
-        RETRIEVAL_K,
-        ge=1,
-        le=30,
-        description="How many chunks to retrieve; all of them are sent to the model.",
-        examples=[RETRIEVAL_K],
-    ),
-    max_images: int = Query(
-        GENERATION_MAX_IMAGES,
-        ge=0,
-        le=50,
-        description="Most images to send to the model, taken in chunk order (0 = all).",
-        examples=[GENERATION_MAX_IMAGES],
-    ),
-) -> StreamingResponse:
-    """Stream an answer over SSE.
-
-    Emits a ``retrieval`` event (full chunk payloads), then one ``token`` event
-    per answer chunk, then a final ``done`` event.  On failure an ``error``
-    event is emitted instead.
-    """
-    service = request.app.state.service
-    await service.ensure_ready()
-
-    def generate():
+def _stream_frames(
+    service: RAGService,
+    req: QueryRequest,
+    llm: BaseChatModel | None,
+) -> Generator[str, None, None]:
+    """Format the service events, raising early failures before the first frame."""
+    events = service.stream_answer(
+        req.query,
+        req.top_k,
+        req.max_images,
+        llm=llm,
+        provider_id=req.llm.provider if req.llm else None,
+        model_id=req.llm.model if req.llm else None,
+    )
+    with closing(events):
+        _, chunks = next(events)
+        _, first_token = next(events)
+        retrieval = service.to_retrieve_response(req.query, chunks)
+        yield _sse("retrieval", retrieval.model_dump())
+        yield _sse("token", {"delta": first_token})
+        tokens = [first_token]
         try:
-            collected: list[str] = []
-            for kind, value in service.stream_answer(query, top_k, max_images):
-                if kind == "chunks":
-                    base = service.to_retrieve_response(query, value)
-                    yield _sse("retrieval", base.model_dump())
-                elif kind == "token":
-                    collected.append(value)
+            for kind, value in events:
+                if kind == "token":
+                    tokens.append(value)
                     yield _sse("token", {"delta": value})
-                else:
-                    answer = "".join(collected)
+                elif kind == "usage":
+                    answer = "".join(tokens)
                     yield _sse(
                         "done",
                         {
                             "answer": answer,
                             "answer_characters": len(answer),
-                            "num_chunks": base.num_chunks,
+                            "num_chunks": retrieval.num_chunks,
                             "usage": value,
                         },
                     )
-        except Exception as exc:
-            yield _sse("error", {"message": str(exc)})
+        except LLMProviderError as exc:
+            yield _sse("error", {"status": 502, "message": str(exc)})
+        except Exception:
+            logger.exception("Unexpected failure while streaming an answer")
+            yield _sse("error", {"status": 500, "message": "Internal server error"})
+
+
+@router.post(
+    "/query/stream",
+    response_class=StreamingResponse,
+    summary="Stream an answer over SSE",
+    description=(
+        "Takes the same JSON body as POST /v1/query, including an optional ``llm``. "
+        "Once the first answer fragment is ready, the event flow is:\n\n"
+        "1. ``event: retrieval`` - full chunk payloads (like /v1/retrieve),\n"
+        "2. ``event: token``    - one per answer fragment (field ``delta``),\n"
+        "3. ``event: done``     - final answer, chunk count and usage,\n"
+        "4. ``event: error``    - replaces ``done`` on mid-stream failure "
+        "(``status`` and ``message``).\n\n"
+        "A provider failure before the first fragment returns HTTP 502. "
+        "Read the stream with browser fetch or curl -N."
+    ),
+    response_description="text/event-stream of retrieval + answer tokens",
+    responses={200: {"content": {"text/event-stream": {}}}, **error_responses(500, 502, 503)},
+)
+async def query_stream(
+    request: Request,
+    req: Annotated[QueryRequest, Body(openapi_examples=QUERY_BODY_EXAMPLES)],
+) -> StreamingResponse:
+    """Take a question and model options and stream the answer over SSE.
+
+    An invalid model raises HTTPException (422). Store and provider errors
+    before the response starts reach the application's HTTP error handlers.
+    """
+    service = request.app.state.service
+    llm = _requested_llm(req.llm)
+    await service.ensure_ready()
+    frames = _stream_frames(service, req, llm)
+    # StreamingResponse sends HTTP headers before it reads the body iterator.
+    first_frame = await run_in_threadpool(next, frames)
+
+    async def generate() -> AsyncIterator[str]:
+        """Send the prepared frame and continue the generator off the event loop."""
+        try:
+            yield first_frame
+            async for frame in iterate_in_threadpool(frames):
+                yield frame
+        finally:
+            with CancelScope(shield=True):
+                await run_in_threadpool(frames.close)
 
     return StreamingResponse(generate(), media_type="text/event-stream")
