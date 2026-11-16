@@ -6,7 +6,8 @@ writes each figure to a file under the images folder and returns one
 LangChain ``Document`` per chunk with flat metadata: ``source``, ``chunk_id``,
 ``raw_text``, ``tables_html``, ``image_paths``, ``has_table``, ``has_image``.
 :func:`create_vector_store` embeds those Documents into Chroma.
-:func:`run_complete_ingestion_pipeline` runs every step for one PDF.
+:func:`run_complete_ingestion_pipeline` runs every step for one PDF;
+:func:`store_export` stores an export that already exists, with no summarising.
 """
 
 from __future__ import annotations
@@ -106,6 +107,42 @@ def create_vector_store(
         persist_directory=persist_directory,
         collection_metadata=CHROMA_COLLECTION_METADATA,
     )
+
+
+@traceable(run_type="chain", name="StoreExport")
+def store_export(
+    export_path: str | Path,
+    persist_directory: str = CHROMA_PERSIST_DIR,
+    images_dir: str | Path = IMAGES_DIR,
+) -> Chroma:
+    """Add one chunk export to the store: write its figures, embed its summaries.
+
+    The document's name (``source``) is the export's file name without ``.json``.
+
+    Args:
+        export_path: A ``<source>.json`` export, as :func:`export_chunks_to_json` writes it.
+        persist_directory: Folder of the Chroma store.
+        images_dir: Folder the figure files are written to.
+
+    Returns:
+        The Chroma store holding the new records.
+
+    Raises:
+        FileExistsError: If the store already holds records for ``source``;
+            nothing is written then.
+    """
+    source = Path(export_path).stem
+    db = Chroma(
+        persist_directory=persist_directory,
+        embedding_function=load_embedding_model(),
+        collection_metadata=CHROMA_COLLECTION_METADATA,
+    )
+    if db.get(where={"source": source}, limit=1)["ids"]:
+        raise FileExistsError(f"{persist_directory} already holds records for {source}")
+    export = json.loads(Path(export_path).read_text(encoding="utf-8"))
+    db.add_documents(documents_from_export(export, source, images_dir))
+    logger.info("Stored %d chunks from %s", len(export), export_path)
+    return db
 
 
 @traceable(run_type="chain", name="FullIngestionPipeline")

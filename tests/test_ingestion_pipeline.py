@@ -103,3 +103,43 @@ def test_pipeline_writes_export_figures_and_records(tmp_path, monkeypatch):
     assert [d.metadata["source"] for d in stored["docs"]] == ["ne555", "ne555"]
     assert (tmp_path / "img" / "ne555_c2_img0.jpg").read_bytes() == JPEG
 
+
+class _FakeStore:
+    """Stands in for Chroma: ``get`` by source and ``add_documents``."""
+
+    def __init__(self, sources: set[str]):
+        self.sources = sources
+        self.added: list = []
+
+    def get(self, where: dict, limit: int) -> dict:
+        return {"ids": ["x"] if where["source"] in self.sources else []}
+
+    def add_documents(self, documents: list) -> None:
+        self.added.extend(documents)
+
+
+def _patch_store(monkeypatch, store: _FakeStore) -> None:
+    monkeypatch.setattr(pipeline, "load_embedding_model", lambda: "fake-embeddings")
+    monkeypatch.setattr(pipeline, "Chroma", lambda **kwargs: store)
+
+
+def test_store_export_adds_its_records_without_summarising(tmp_path, monkeypatch):
+    (tmp_path / "ne555.json").write_text(json.dumps(_export()))
+    store = _FakeStore(sources={"lm317"})
+    _patch_store(monkeypatch, store)
+    monkeypatch.setattr(pipeline, "summarise_chunks", lambda *a: pytest.fail("no summarising"))
+
+    pipeline.store_export(tmp_path / "ne555.json", "store", tmp_path / "img")
+    assert [d.metadata["source"] for d in store.added] == ["ne555", "ne555"]
+    assert (tmp_path / "img" / "ne555_c2_img0.jpg").read_bytes() == JPEG
+
+
+def test_store_export_refuses_a_document_already_stored(tmp_path, monkeypatch):
+    (tmp_path / "ne555.json").write_text(json.dumps(_export()))
+    store = _FakeStore(sources={"ne555"})
+    _patch_store(monkeypatch, store)
+
+    with pytest.raises(FileExistsError):
+        pipeline.store_export(tmp_path / "ne555.json", "store", tmp_path / "img")
+    assert store.added == []
+    assert not (tmp_path / "img").exists(), "no figure is written either"

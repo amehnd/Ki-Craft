@@ -393,6 +393,18 @@ Then ingest one PDF, or every PDF in a folder:
 python -m scripts.ingest data/ --backend local
 ```
 
+To check the summaries before they reach the store, write only the export to `json/` and send the records and figures to a scratch folder. The dashboard lists every `json/*.json`, so the new document can be read in the chunk inspector:
+
+```bash
+python -m scripts.ingest data/ne555.pdf --backend local --store /tmp/trial/chroma_db --images /tmp/trial/images
+```
+
+Once the summaries look right, store that export as it is, with no summary model call (it is refused if the store already holds that document):
+
+```bash
+python -m scripts.ingest json/ne555.json
+```
+
 Each PDF is done in full or not at all. A PDF whose export (`json/<name>.json`) already exists is skipped, and a PDF that fails is logged while the batch carries on, so an interrupted overnight run resumes with the same command. `--store`, `--images` and `--exports` write somewhere other than the tracked store, for a trial run.
 
 The summary settings are environment variables (defaults in `config/settings.py`):

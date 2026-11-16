@@ -1,15 +1,21 @@
-"""Ingest PDFs into the Chroma store, one document at a time.
+"""Ingest PDFs, or existing chunk exports, into the Chroma store.
 
-Each PDF goes through :func:`src.ingestion.pipeline.run_complete_ingestion_pipeline`:
+A PDF goes through :func:`src.ingestion.pipeline.run_complete_ingestion_pipeline`:
 the chunk export goes to ``<exports>/<pdf name>.json``, figures to
 ``<images>``, and the records to ``<store>``. A PDF whose export already exists
-is skipped, so an interrupted batch can be re-run with the same command. A PDF
-that fails is logged and the batch moves on; nothing of it is written.
+is skipped, so an interrupted batch can be re-run with the same command.
+
+A ``.json`` export goes through :func:`src.ingestion.pipeline.store_export`:
+its summaries are embedded as they are, with no summary model. It is skipped
+if the store already holds that document.
+
+A file that fails is logged and the batch moves on; nothing of it is stored.
 
 Usage:
     python -m scripts.ingest data/ne555.pdf
     python -m scripts.ingest data/ --backend local
     python -m scripts.ingest data/ne555.pdf --backend local --store /tmp/store --images /tmp/images --exports /tmp/json
+    python -m scripts.ingest json/ne555.json
 
 The summary backend's tunables (timeout, retries, max tokens, image limits)
 are environment variables; see the enhancement settings in config/settings.py.
@@ -33,14 +39,14 @@ from config.settings import (
     JSON_EXPORT_DIR,
 )
 from src.ingestion.enrich import check_enhancement_backend
-from src.ingestion.pipeline import run_complete_ingestion_pipeline
+from src.ingestion.pipeline import run_complete_ingestion_pipeline, store_export
 from src.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-def _pdfs(paths: list[str]) -> list[Path]:
-    """Expand folders to the PDFs inside them, sorted by name."""
+def _inputs(paths: list[str]) -> list[Path]:
+    """Expand folders to the PDFs inside them, sorted by name; keep files as given."""
     found: list[Path] = []
     for raw in paths:
         path = Path(raw)
@@ -50,8 +56,8 @@ def _pdfs(paths: list[str]) -> list[Path]:
 
 def main() -> int:
     """Parse arguments, ingest each PDF, and return the process exit code."""
-    parser = argparse.ArgumentParser(description="Ingest PDFs into the Chroma store.")
-    parser.add_argument("paths", nargs="+", help="PDF files, or folders of PDFs")
+    parser = argparse.ArgumentParser(description="Ingest PDFs or chunk exports into the Chroma store.")
+    parser.add_argument("paths", nargs="+", help="PDF files, folders of PDFs, or .json chunk exports")
     parser.add_argument("--backend", choices=sorted(ENHANCEMENT_BACKENDS), default=ENHANCEMENT_BACKEND,
                         help="summary model backend (default: ENHANCEMENT_BACKEND, %(default)s)")
     parser.add_argument("--store", default=CHROMA_PERSIST_DIR, help="Chroma folder (default: %(default)s)")
@@ -59,16 +65,20 @@ def main() -> int:
     parser.add_argument("--exports", default=JSON_EXPORT_DIR, help="chunk exports folder (default: %(default)s)")
     args = parser.parse_args()
 
-    check_enhancement_backend(args.backend)
-    pdfs = _pdfs(args.paths)
-    logger.info("Ingesting %d PDFs with the %s backend into %s", len(pdfs), args.backend, args.store)
+    inputs = _inputs(args.paths)
+    if any(path.suffix.lower() != ".json" for path in inputs):
+        check_enhancement_backend(args.backend)
+    logger.info("Ingesting %d files with the %s backend into %s", len(inputs), args.backend, args.store)
 
     done, skipped, failed = [], [], []
-    for n, pdf in enumerate(pdfs, start=1):
-        logger.info("[%d/%d] %s", n, len(pdfs), pdf)
+    for n, pdf in enumerate(inputs, start=1):
+        logger.info("[%d/%d] %s", n, len(inputs), pdf)
         t0 = time.monotonic()
         try:
-            run_complete_ingestion_pipeline(pdf, args.store, args.images, args.exports, args.backend)
+            if pdf.suffix.lower() == ".json":
+                store_export(pdf, args.store, args.images)
+            else:
+                run_complete_ingestion_pipeline(pdf, args.store, args.images, args.exports, args.backend)
         except FileExistsError as exc:
             logger.info("  Skipped: %s", exc)
             skipped.append(pdf)
