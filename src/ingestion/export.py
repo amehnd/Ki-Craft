@@ -2,8 +2,8 @@
 
 Writes the summarised chunks to ``<source>.json``: each chunk's summary and its
 original text, tables and figures (base64). The export can rebuild the store
-without summarising again (``scripts/ingest_colab.py``) and is what the
-dashboard's dataset browser shows.
+without summarising again (``python -m scripts.ingest json/<source>.json``)
+and is what the dashboard's dataset browser shows.
 """
 
 from __future__ import annotations

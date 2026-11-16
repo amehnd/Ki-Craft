@@ -69,7 +69,7 @@ flowchart TB
         PART["extract.py<br/>unstructured partition_pdf, hi_res"]
         CHUNK["chunk.py<br/>chunk_by_title, max 3000 chars"]
         ENRICH["enrich.py<br/>vision LLM summary per chunk (GLM-4.5V)"]
-        BUILD["scripts/ingest_colab.py<br/>embed each summary (watsonx Granite, 768 dims),<br/>write figure files"]
+        BUILD["pipeline.py (scripts/ingest.py)<br/>embed each summary (watsonx Granite, 768 dims),<br/>write figure files"]
         PART --> CHUNK --> ENRICH
     end
 
@@ -290,12 +290,6 @@ A second, smaller app shows evaluation results:
 streamlit run app/rag_eval_dashboard.py
 ```
 
-There is also a command-line query script that prompts for a question:
-
-```bash
-python -m scripts.query
-```
-
 ## Running with Docker
 
 The image contains only the backend code and the pre-built store (`api/`, `src/`, `config/`, `dbv2/`). It is about 1.17 GB and holds no secrets; credentials are passed at run time.
@@ -349,12 +343,12 @@ Ingestion is not needed to use the five documents that ship with the repository.
 - It calls a vision model once for every chunk with tables or figures. `--backend huggingface` (the default) uses GLM-4.5V on the Hugging Face router, which needs `HF_TOKEN` and credit. `--backend local` uses a model on your Mac through `mlx_vlm.server`; see below.
 - It calls watsonx once per chunk for the embedding.
 - It writes to the tracked store in `dbv2/chroma_db`, so it changes files that git tracks.
-- There are two entry points. Both store records the same way (`src/ingestion/pipeline.py:documents_from_export`): each figure becomes a file in `dbv2/images`, and the record holds its path and a `source` name.
+- One script, `scripts/ingest.py`, takes either input. Both store records the same way (`src/ingestion/pipeline.py:documents_from_export`): each figure becomes a file in `dbv2/images`, and the record holds its path and a `source` name.
 
-| Script | Input | What it does |
-|---|---|---|
-| `python -m scripts.ingest` | one PDF | Parses, chunks, summarises, writes the export to `json/<pdf name>.json`, then stores the records. It stops if that export already exists, so a document is not added twice |
-| `python -m scripts.ingest_colab` | the JSON exports in `json/` | Embeds the existing summaries and stores the records, with no summarising |
+| Input | What it does |
+|---|---|
+| a PDF, or a folder of PDFs | Parses, chunks, summarises, writes the export to `json/<pdf name>.json`, then stores the records. It skips a PDF whose export already exists |
+| a `json/<name>.json` export | Embeds the existing summaries and stores the records, with no summarising. It refuses a document the store already holds unless `--replace` is given; replacing embeds first and only then removes the old records and figures |
 
 PDF parsing needs system packages:
 
@@ -479,7 +473,7 @@ app/
   dashboard.py           Streamlit UI
   api_client.py          the only place the UI talks to the backend
   rag_eval_dashboard.py  Streamlit viewer for evaluation results
-scripts/                 command-line entry points (ingest, query, Colab ingestion)
+scripts/                 command-line ingestion (scripts/ingest.py)
 dbv2/                    the built Chroma store and the figure images
 json/                    per-document chunk exports used by the dashboard
 data/                    source PDFs
