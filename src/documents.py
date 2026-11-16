@@ -1,18 +1,21 @@
-"""Document helpers shared across the retrieval and UI layers.
+"""Read a stored chunk's original text, tables and figures from its metadata.
 
-The pipeline stores the original multimodal content of every chunk inside its
-``metadata``.  Over time two storage schemas have been used:
+A chunk's ``page_content`` is its summary; its ``metadata`` holds the original
+content. Two metadata layouts are read:
 
-* **Nested** -- ``metadata["original_content"]`` is a JSON string (or dict)
-  containing ``raw_text``, ``tables_html`` and ``images_base64``.
-* **Flattened** -- ``metadata`` holds ``raw_text`` and ``tables_html`` directly,
-  while images are referenced by file path in ``metadata["image_paths"]``.
+* figures as files: ``raw_text``, ``tables_html`` and ``image_paths`` (JSON
+  strings of paths under ``IMAGES_DIR``);
+* figures inline: ``original_content`` holding ``raw_text``, ``tables_html``
+  and ``images_base64``.
 
-This module normalises both schemas into a single dict so callers never need to
-know which one a document uses. Figure URLs (``/v1/images/{record_id}/{position}``)
-are served from files only, so :func:`image_file` reads the flattened schema;
-the nested one is what ``scripts/ingest.py`` still writes, and its figures have
-no URL.
+Functions:
+
+* :func:`chunk_text_and_tables` - text and tables, no figure read.
+* :func:`stored_image_paths`, :func:`stored_image_count` - which figures a
+  chunk has, without reading them.
+* :func:`image_file` - the file behind one image URL, kept inside ``IMAGES_DIR``.
+* :func:`extract_original_data` - text, tables and figures as base64, for the
+  model request and trace attachments.
 """
 
 from __future__ import annotations
@@ -43,12 +46,48 @@ def _parse_json_value(raw: Any, default: Any) -> Any:
     return raw if raw is not None else default
 
 
-def extract_original_data(chunk: Document) -> dict:
-    """Return the chunk's original multimodal content as a dict.
+def _nested_content(metadata: dict) -> dict | None:
+    """Return the parsed ``original_content`` dict, or None when figures are files."""
+    raw = metadata.get("original_content")
+    if raw is None:
+        return None
+    parsed = _parse_json_value(raw, {})
+    return parsed if isinstance(parsed, dict) else None
 
-    The returned dict always contains the keys ``raw_text`` (str),
-    ``tables_html`` (list[str]) and ``images_base64`` (list[str]), so callers
-    can rely on a stable shape regardless of the underlying metadata schema.
+
+def chunk_text_and_tables(chunk: Document) -> dict:
+    """Return a chunk's original text and tables without reading its figures.
+
+    Args:
+        chunk: A retrieved LangChain ``Document``.
+
+    Returns:
+        Dict with ``raw_text`` (str) and ``tables_html`` (list[str]).
+    """
+    metadata = chunk.metadata or {}
+    source = _nested_content(metadata)
+    if source is None:
+        source = metadata
+    return {
+        "raw_text": source.get("raw_text", ""),
+        "tables_html": _parse_json_value(source.get("tables_html"), []),
+    }
+
+
+def stored_image_count(chunk: Document) -> int:
+    """Count a chunk's figures, files or inline, without reading any."""
+    metadata = chunk.metadata or {}
+    nested = _nested_content(metadata)
+    if nested is not None:
+        return len(nested.get("images_base64") or [])
+    return len(stored_image_paths(metadata))
+
+
+def extract_original_data(chunk: Document) -> dict:
+    """Return the chunk's text, tables and figures, the figures as base64.
+
+    Reads every figure file of the chunk; use :func:`chunk_text_and_tables`
+    when the figures are not needed.
 
     Args:
         chunk: A retrieved LangChain ``Document``.
@@ -57,50 +96,29 @@ def extract_original_data(chunk: Document) -> dict:
         Dict with ``raw_text``, ``tables_html`` and ``images_base64`` keys.
     """
     metadata = chunk.metadata or {}
-
-    # Preferred schema: the full original payload stored inline.
-    raw = metadata.get("original_content")
-    if raw is not None:
-        parsed = _parse_json_value(raw, {})
-        if isinstance(parsed, dict):
-            return {
-                "raw_text": parsed.get("raw_text", ""),
-                "tables_html": _parse_json_value(parsed.get("tables_html"), []),
-                "images_base64": parsed.get("images_base64", []),
-            }
-
-    # Fallback schema: fields are flattened onto the metadata dict directly,
-    # and images live on disk (referenced by path).
-    tables_html = _parse_json_value(metadata.get("tables_html"), [])
-    image_paths = _parse_json_value(metadata.get("image_paths"), [])
-
-    images_base64: list[str] = []
-    for path in image_paths:
-        images_base64.append(_read_image_as_base64(path))
-
-    return {
-        "raw_text": metadata.get("raw_text", ""),
-        "tables_html": tables_html,
-        "images_base64": images_base64,
-    }
+    nested = _nested_content(metadata)
+    if nested is not None:
+        images_base64 = nested.get("images_base64", [])
+    else:
+        # Figures are files; the metadata holds their paths.
+        images_base64 = [
+            _read_image_as_base64(path)
+            for path in _parse_json_value(metadata.get("image_paths"), [])
+        ]
+    return {**chunk_text_and_tables(chunk), "images_base64": images_base64}
 
 
 def stored_image_paths(metadata: dict) -> list[str]:
-    """Return a record's figure paths, in stored order; empty when it has none.
-
-    Only the flattened schema has paths; figures stored inline as base64 have
-    none, so they get no URL.
-    """
+    """Return a record's figure paths in stored order; empty for inline figures."""
     paths = _parse_json_value(metadata.get("image_paths"), [])
     return [str(path) for path in paths] if isinstance(paths, list) else []
 
 
 def image_file(metadata: dict, position: int) -> Path | None:
-    """Find the file of one figure of a stored record.
+    """Find the file behind one image URL, ``/v1/images/{record_id}/{position}``.
 
-    The path comes from the record's own metadata, never from the caller, and
-    must resolve to a file inside ``IMAGES_DIR``; anything else (a stored path
-    with ``..`` or an absolute path elsewhere) is treated as missing.
+    The path comes from the record's metadata and must resolve to a file inside
+    ``IMAGES_DIR``; anything else is treated as missing.
 
     Args:
         metadata: The record's metadata, as Chroma stores it.
@@ -122,11 +140,9 @@ def image_file(metadata: dict, position: int) -> Path | None:
 
 
 def _read_image_as_base64(image_path: str) -> str:
-    """Resolve a stored image path to a base64-encoded JPEG string.
+    """Read one figure (path relative to the repository root) as base64.
 
-    Paths saved in metadata are relative to the repository root.  If the file
-    cannot be read (missing or corrupt) an empty string is returned and the
-    problem is logged instead of raising.
+    An unreadable file gives an empty string and a warning, not an error.
     """
     clean = image_path.lstrip("./")
     full_path = _PROJECT_ROOT / clean

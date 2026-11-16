@@ -257,16 +257,17 @@ def test_retrieve_returns_chunks_with_tables_and_images(client):
 
     assert body["query"] == "LM317 pins"
     assert body["num_chunks"] == 2
-    assert body["total_images"] == 2
+    assert body["total_images"] == 1, "only figures with a URL are counted"
     assert body["total_tables"] == 1
+    assert "response_id" not in body
 
     first, second = body["chunks"]
     assert first["chunk_id"] == 1
     assert first["source"] == "lm317"
     assert first["raw_text"] == "Pin 1 ADJ, pin 2 VOUT, pin 3 VIN."
-    assert first["has_table"] and first["has_image"]
+    assert first["has_table"] and not first["has_image"]
     assert first["record_id"] == LM317_ID
-    assert first["images_base64"] == [base64.b64encode(JPEG_BYTES).decode()]
+    assert "images_base64" not in first
     assert first["image_urls"] == [], "a figure stored inline has no URL"
     assert "original_content" not in first["metadata"]
     assert second["record_id"] == TLV1117_ID
@@ -277,6 +278,16 @@ def test_retrieve_returns_chunks_with_tables_and_images(client):
 def test_retrieve_rejects_bad_input(client):
     assert client.post("/v1/retrieve", json={"query": ""}).status_code == 422
     assert client.post("/v1/retrieve", json={"query": "x", "top_k": 31}).status_code == 422
+
+
+def test_building_a_response_reads_no_image_file(client, monkeypatch):
+    """Responses carry URLs, so retrieval alone never opens a figure."""
+
+    def opened(path):
+        raise AssertionError(f"a response build read the image {path}")
+
+    monkeypatch.setattr(src.documents, "_read_image_as_base64", opened)
+    assert client.post("/v1/retrieve", json={"query": "x", "top_k": 2}).status_code == 200
 
 
 def test_image_url_serves_the_file(client):
@@ -397,7 +408,8 @@ def test_stream_emits_retrieval_tokens_done(client):
     assert [data["delta"] for name, data in events if name == "token"] == ["Hello", " world"]
     done = events[-1][1]
     assert done["answer"] == "Hello world"
-    assert done["response_id"] == events[0][1]["response_id"]
+    assert done["num_chunks"] == 2
+    assert "response_id" not in done and "response_id" not in events[0][1]
 
 
 def test_stream_reports_llm_failure_as_error_event(client, backend):
@@ -440,7 +452,7 @@ def test_query_with_text_only_model_gets_no_figures(client, backend):
     assert response.status_code == 200
     assert response.json()["usage"]["prompt_images"] == 0
     assert [part["type"] for part in backend.prompts[0][0].content] == ["text"]
-    assert response.json()["total_images"] == 2, "the response still lists the chunks' figures"
+    assert response.json()["total_images"] == 1, "the response still lists the chunk's figure URL"
 
 
 def test_query_with_llm_without_max_tokens_uses_catalogue_default(client, backend):

@@ -123,19 +123,18 @@ minus the two `answer` fields):
   "num_chunks": 2,                 // how many chunks were retrieved
   "total_images": 3,               // sum of image_count across chunks
   "total_tables": 2,               // sum of tables across chunks
-  "response_id": "79c107621a50474989f2c3eab59beb7a",  // key for image URLs
   "answer": "The LM317 is an adjustable linear voltage regulator...",  // /v1/query only
   "answer_characters": 1086,       // /v1/query only
   "chunks": [
     {
       "chunk_id": 1,               // 1-based position within this response
+      "record_id": "004ca22b-a528-444e-9c0e-27c8b5858ff5", // stable id in the store
       "enhanced_content": "**SEARCHABLE DESCRIPTION: LM317 Voltage Regulator...", // markdown
       "raw_text": "Pin 1 (ADJ): adjustment pin...", // plain OCR text
       "tables_html": ["<table><tr><th>Pin</th><th>Name</th>...</table>"],
-      "image_count": 2,
-      "images_base64": ["/9j/4AAQSkZJRg==...", "/9j/4AAQSkZJRg==..."],
-      "image_urls": ["/v1/images/79c107621a50474989f2c3eab59beb7a/0",
-                     "/v1/images/79c107621a50474989f2c3eab59beb7a/1"],
+      "image_count": 2,            // = len(image_urls)
+      "image_urls": ["/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0",
+                     "/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/1"],
       "has_table": true,
       "has_image": true,
       "source": "lm317_datasheet.pdf",
@@ -152,34 +151,25 @@ minus the two `answer` fields):
 | `enhanced_content` | string | Markdown text. Render with a markdown parser (it uses `**bold**`, headings, lists). This is the search-friendly summary. |
 | `raw_text` | string | Plain OCR text from the PDF. Use for a "raw source" toggle. |
 | `tables_html` | string[] | Each entry is a full `<table>...</table>` HTML string. Inject as HTML (sanitise first) or parse into your own table component. |
-| `images_base64` | string[] | Base64-encoded JPEGs (note the `data:image/jpeg` prefix is **not** included — add it yourself if needed). |
-| `image_urls` | string[] | Relative HTTP paths to the same images. **Prefetch and absolutise these** (see §5). |
+| `record_id` | string \| null | The chunk's id in the vector store. Stable, and part of its image URLs. |
+| `image_urls` | string[] | Relative HTTP path of each figure. **Prefix with the base URL** (see §5). |
 | `has_table` / `has_image` | boolean | Quick flags to skip rendering empty sections. |
 | `source` | string \| null | Source filename, if the chunk knows it. |
 
-### The two ways to get images (important)
+### Getting the figures
 
-Every figure exists in **two formats**:
+Responses carry no image bytes. Each figure is an HTTP URL in `image_urls`,
+e.g. `/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/1`. Fetch it with
+`GET {base}` plus that path and you get **raw JPEG bytes**
+(`Content-Type: image/jpeg`). Use it directly in `<img src>`:
 
-1. **Inline base64** — `images_base64[i]`. It is a **base64-encoded JPEG string**,
-   without the `data:` prefix. To display:
-   ```js
-   `<img src="data:image/jpeg;base64,${chunk.images_base64[i]}">`
-   ```
-   Pros: works forever, no extra request, no server state. Cons: big JSON payloads.
+```js
+`<img src="${base}${chunk.image_urls[i]}">`
+```
 
-2. **HTTP URL** — `image_urls[i]`, e.g.
-   `/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/1`. Fetch it with
-   `GET {base}` plus that path and you get **raw JPEG bytes**
-   (`Content-Type: image/jpeg`). Use it directly in `<img src>`:
-   ```js
-   `<img src="${base}${chunk.image_urls[i]}">`
-   ```
-   Pros: tiny JSON, stable, cacheable for a day (`Cache-Control: public,
-   max-age=86400`).
-
-Both are the **same JPEG**. Prefer the URL: `images_base64` is removed in the
-next API change.
+The URL is stable and cacheable for a day (`Cache-Control: public,
+max-age=86400`), so the JSON stays small and the browser fetches each figure
+once.
 
 ---
 
@@ -199,7 +189,7 @@ Event flow, in order:
 |---|---|---|
 | `retrieval` | a full `RetrieveResponse` (the chunks) | immediately, once |
 | `token` | `{"delta": "The "}` | many times, one fragment of the answer each |
-| `done` | `{"answer": "...", "answer_characters": 1086, "response_id": "...", "num_chunks": 2}` | after the last token |
+| `done` | `{"answer": "...", "answer_characters": 1086, "num_chunks": 2, "usage": {...}}` | after the last token |
 | `error` | `{"message": "..."}` | only if something fails after the stream started; `message` is the same text an error `detail` would carry |
 
 ```js
@@ -270,12 +260,9 @@ can load them.
   `422`, and an unknown record or position is a `404`.
 
 - **Figures stored inline have no URL.** A document ingested with
-  `scripts/ingest.py` stores its figures as base64 inside the store. They still
-  appear in `images_base64` and count in `image_count`, but `image_urls` is
-  empty for them until ingestion writes figure files (planned).
-
-- **`response_id` no longer keys anything.** It is still in responses and will
-  be removed in the next API change.
+  `scripts/ingest.py` stores its figures as base64 inside the store. They get
+  no URL and are not counted in `image_count` until ingestion writes figure
+  files (planned). The model still sees them.
 
 - **Handle image load errors.** Show a broken-image fallback on a `404`.
 
@@ -317,5 +304,5 @@ can load them.
 | A ready-to-display answer + evidence | `POST /v1/query` |
 | Evidence only (build your own answer elsewhere) | `POST /v1/retrieve` |
 | A typewriter/streaming answer effect | `GET /v1/query/stream` |
-| The figures of a response | `images_base64` (inline) or `image_urls` → `GET /v1/images/...` |
+| The figures of a response | `image_urls` → `GET /v1/images/...` |
 | Just a health/probe check | `GET /health` |

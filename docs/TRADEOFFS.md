@@ -291,7 +291,7 @@ Request body shared by `/v1/query` and `/v1/query/stream`:
 `document_ids` arrives in Checkpoint 7; until then all documents are searched.
 
 Response changes:
-- **Removed:** `images_base64` and `response_id`.
+- **Removed:** `images_base64` and `response_id` (done 2026-11-16).
 - **Added, as the features arrive:**
   - `query_id` (Checkpoint 6), to attach feedback;
   - `cached` (Checkpoint 8);

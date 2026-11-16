@@ -127,12 +127,10 @@ class QueryRequest(RetrieveRequest):
 class ChunkPayload(BaseModel):
     """One retrieved chunk with its full multimodal content.
 
-    Images are returned twice until 6d-2 removes the base64 copy: inline
-    base64, and ``image_urls`` to load each figure over HTTP. A URL is
-    ``/v1/images/{record_id}/{position}``: the chunk's Chroma record id and
-    the figure's 0-based position within the chunk. It stays valid across
-    restarts and servers. Figures stored inline as base64 (the layout
-    ``scripts/ingest.py`` writes) have no URL.
+    Figures are not inline: ``image_urls`` lists one stable URL per figure,
+    ``/v1/images/{record_id}/{position}``, built from the chunk's Chroma
+    record id and the figure's 0-based position within the chunk.
+    ``image_count`` counts those URLs; figures stored inline have none.
     """
 
     chunk_id: int = Field(..., description="1-based position in this response")
@@ -145,8 +143,7 @@ class ChunkPayload(BaseModel):
     )
     raw_text: str = Field("", description="Original OCR text extracted from the PDF")
     tables_html: list[str] = Field(default_factory=list, description="HTML table markup")
-    image_count: int = Field(0, description="Number of images in this chunk")
-    images_base64: list[str] = Field(default_factory=list, description="Inline base64 images")
+    image_count: int = Field(0, description="Number of figures in image_urls")
     image_urls: list[str] = Field(
         default_factory=list,
         description="Stable URL of each figure, /v1/images/{record_id}/{position}",
@@ -177,7 +174,6 @@ class ChunkPayload(BaseModel):
                     "<tr><td>1</td><td>ADJ</td><td>Adjust</td></tr></table>"
                 ],
                 "image_count": 2,
-                "images_base64": ["<base64-encoded-jpeg>", "<base64-encoded-jpeg>"],
                 "image_urls": [
                     "/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0",
                     "/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/1",
@@ -196,15 +192,8 @@ class RetrieveResponse(BaseModel):
 
     query: str
     num_chunks: int = Field(..., description="Number of chunks returned")
-    total_images: int = Field(..., description="Images across all chunks")
+    total_images: int = Field(..., description="Figures (image URLs) across all chunks")
     total_tables: int = Field(..., description="Tables across all chunks")
-    response_id: str = Field(
-        ...,
-        description=(
-            "A random id for this response. It no longer keys the image URLs "
-            "and will be removed."
-        ),
-    )
     chunks: list[ChunkPayload] = Field(default_factory=list)
 
     model_config = ConfigDict(
@@ -214,7 +203,6 @@ class RetrieveResponse(BaseModel):
                 "num_chunks": 2,
                 "total_images": 2,
                 "total_tables": 1,
-                "response_id": "79c107621a50474989f2c3eab59beb7a",
                 "chunks": [
                     {
                         "chunk_id": 1,
@@ -223,7 +211,6 @@ class RetrieveResponse(BaseModel):
                         "raw_text": "Pin 1 (ADJ): ...",
                         "tables_html": ["<table>..."],
                         "image_count": 2,
-                        "images_base64": ["<base64-encoded-jpeg>", "<base64-encoded-jpeg>"],
                         "image_urls": [
                             "/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0",
                             "/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/1",
@@ -297,7 +284,6 @@ class QueryResponse(RetrieveResponse):
                 "num_chunks": 2,
                 "total_images": 2,
                 "total_tables": 1,
-                "response_id": "79c107621a50474989f2c3eab59beb7a",
                 "answer": (
                     "The LM317 is an adjustable linear voltage regulator with "
                     "three pins. Pin 1 is the adjust (ADJ) pin, used to set the "

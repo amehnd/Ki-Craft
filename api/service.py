@@ -14,7 +14,6 @@ Every query, with the default model or a caller-chosen one, goes through
 from __future__ import annotations
 
 import asyncio
-import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -26,7 +25,7 @@ from config.settings import (
     GENERATION_PROVIDER,
     RETRIEVAL_K,
 )
-from src.documents import extract_original_data, image_file, stored_image_paths
+from src.documents import chunk_text_and_tables, image_file, stored_image_paths
 from src.embed import load_embedding_model
 from src.llm import accepts_images
 from src.logger import get_logger
@@ -209,17 +208,23 @@ class RAGService:
         Each figure stored as a file gets a stable URL,
         ``/v1/images/{record_id}/{position}``, where ``record_id`` is the
         chunk's Chroma record id and ``position`` counts from 0 within the
-        chunk. ``response_id`` no longer keys anything; it goes in 6d-2.
+        chunk. No image file is read: the response carries URLs, not bytes,
+        so ``image_count`` and ``total_images`` count those URLs.
         """
-        response_id = uuid.uuid4().hex
-
         payloads: list[ChunkPayload] = []
         total_images = 0
         total_tables = 0
         for i, chunk in enumerate(chunks):
-            raw = extract_original_data(chunk)
-            images = raw["images_base64"]
+            raw = chunk_text_and_tables(chunk)
             tables = raw["tables_html"]
+            image_urls = (
+                [
+                    f"/v1/images/{chunk.id}/{position}"
+                    for position in range(len(stored_image_paths(chunk.metadata or {})))
+                ]
+                if chunk.id
+                else []
+            )
             metadata = {
                 k: v
                 for k, v in (chunk.metadata or {}).items()
@@ -231,22 +236,16 @@ class RAGService:
                     enhanced_content=chunk.page_content or "",
                     raw_text=raw["raw_text"],
                     tables_html=tables,
-                    image_count=len(images),
-                    images_base64=images,
+                    image_count=len(image_urls),
                     record_id=chunk.id,
-                    image_urls=[
-                        f"/v1/images/{chunk.id}/{position}"
-                        for position in range(len(stored_image_paths(chunk.metadata or {})))
-                    ]
-                    if chunk.id
-                    else [],
+                    image_urls=image_urls,
                     has_table=bool(tables),
-                    has_image=bool(images),
+                    has_image=bool(image_urls),
                     source=metadata.get("source"),
                     metadata=metadata,
                 )
             )
-            total_images += len(images)
+            total_images += len(image_urls)
             total_tables += len(tables)
 
         return RetrieveResponse(
@@ -254,6 +253,5 @@ class RAGService:
             num_chunks=len(chunks),
             total_images=total_images,
             total_tables=total_tables,
-            response_id=response_id,
             chunks=payloads,
         )

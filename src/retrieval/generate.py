@@ -29,7 +29,7 @@ from config.settings import (
     GENERATION_PROVIDER,
     GENERATION_TEMPERATURE,
 )
-from src.documents import extract_original_data
+from src.documents import chunk_text_and_tables, extract_original_data
 from src.llm import LLMProviderError, create_llm
 from src.logger import get_logger
 from src.retrieval.search import retrieve_chunks
@@ -127,7 +127,7 @@ def _build_text_prompt(chunks: list[Document], query: str, with_images: bool = T
             parts.append(f"--- Chunk {i + 1} ---")
             parts.append(f"SUMMARY:\n{enhanced.strip()}\n")
 
-        tables_html = extract_original_data(chunk)["tables_html"]
+        tables_html = chunk_text_and_tables(chunk)["tables_html"]
         if tables_html:
             parts.append("TABLES:")
             for j, table in enumerate(tables_html):
@@ -384,14 +384,13 @@ def generate_answer_stream(
     total_tables = sum(c.get("table_count", 0) for c in chunk_summaries)
 
     logger.info("  %d chunks received by generation", len(chunks))
-    for ci, c in enumerate(chunks):
-        od = extract_original_data(c)
+    for ci, (c, summary) in enumerate(zip(chunks, summarize_chunks(chunks, max_preview=len(chunks)))):
         logger.debug(
             "    Chunk %d: summary=%d chars, tables=%d, images=%d",
             ci + 1,
             len(c.page_content or ""),
-            len(od["tables_html"]),
-            len(od["images_base64"]),
+            summary["table_count"],
+            summary["image_count"],
         )
 
     message_content = _build_message_content(chunks, query, max_images, send_images)

@@ -104,7 +104,7 @@ def _sse(event: str, data: dict) -> str:
         "Streams the answer token-by-token over Server-Sent Events. Event flow:\n\n"
         "1. ``event: retrieval`` - full chunk payloads (like /v1/retrieve),\n"
         "2. ``event: token``    - one per answer fragment (field ``delta``),\n"
-        "3. ``event: done``     - final answer + ``response_id``,\n"
+        "3. ``event: done``     - final answer, chunk count and usage,\n"
         "4. ``event: error``    - only on failure (``message`` says why).\n\n"
         "Open the URL directly in a browser to watch the stream, or consume it "
         "with any SSE client. Works with e.g. ``curl -N``."
@@ -162,7 +162,6 @@ async def query_stream(
                         {
                             "answer": answer,
                             "answer_characters": len(answer),
-                            "response_id": base.response_id,
                             "num_chunks": base.num_chunks,
                             "usage": value,
                         },
