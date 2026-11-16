@@ -241,6 +241,7 @@ Each checkpoint is a set of small commits. Finish one, let the owner test and pu
   - streamed usage tokens reporting 0;
   - cost estimates hardcoded to Gemini prices.
 - Answer prompt rewritten 2026-11-16 (`src/retrieval/generate.py:_build_messages`). A system message holds the rules: answer only from the context, say when the documents do not state it, never mix values from different documents, keep units and conditions, cite figures as `[F1]`. The user message gives each chunk's document name, summary, original text (`raw_text`, previously never sent) and tables, each figure right after its chunk, and the question last. On three live questions it stopped presenting the LM555 diagram as the NE555's and gave the LM317 reference voltage range (1.2, 1.25, 1.3 V) where it had invented a 4.95 V maximum; prompts are about 40 to 70 percent longer.
+- Tables in prompts are Markdown since 2026-11-16 (`src/tables.py:table_to_markdown`, used by the answer and summary prompts). Unstructured has no Markdown table output, so tables stay stored as HTML (lossless, rendered by the dashboard) and are converted only when a prompt is built: 32 percent fewer tokens across the 118 stored tables. Merged cells are repeated, a rowspan stops at the end of its section, and empty tables are skipped.
 
 **Checkpoint 4. Frontend separation.**
 - `app/` gets its own small settings module.

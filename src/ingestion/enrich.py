@@ -35,6 +35,7 @@ from config.settings import (
     LOCAL_ENHANCEMENT_THINKING,
 )
 from src.logger import get_logger
+from src.tables import table_to_markdown
 
 logger = get_logger(__name__)
 
@@ -154,7 +155,8 @@ def _build_enhancement_prompt(text: str, tables: list[str], document: str = "") 
     if document:
         prompt += f"DOCUMENT: {document}\n\n"
     prompt += f"CHUNK TEXT:\n{text}\n\n"
-    for i, table in enumerate(tables, start=1):
+    markdown_tables = [markdown for markdown in map(table_to_markdown, tables) if markdown]
+    for i, table in enumerate(markdown_tables, start=1):
         prompt += f"TABLE {i}:\n{table}\n\n"
     prompt += (
         "Describe what this chunk contains: its specific facts, numbers and conditions,\n"
@@ -183,7 +185,7 @@ def create_ai_enhanced_summary(
     Args:
         client: From :func:`create_enhancement_client` for the same ``backend``.
         text: Raw OCR text of the chunk.
-        tables: HTML tables of the chunk.
+        tables: HTML tables of the chunk; the prompt carries them as Markdown.
         images: Base64 JPEG figures of the chunk; at most
             ``ENHANCEMENT_MAX_IMAGES`` are sent (0 = all).
         backend: Which entry of ``ENHANCEMENT_BACKENDS`` names the model.

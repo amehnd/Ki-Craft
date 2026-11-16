@@ -1,7 +1,7 @@
 """Answer generation using a multimodal LLM.
 
 Builds the prompt from retrieved chunks (a system message with the rules,
-then each chunk's document name, summary, original text, HTML tables and
+then each chunk's document name, summary, original text, tables (as Markdown) and
 figures, then the question), streams an answer from the chat model it is
 given, and wraps
 both retrieval and generation under a single LangSmith trace so the whole
@@ -37,6 +37,7 @@ from src.documents import chunk_text_and_tables, image_file, stored_image_paths
 from src.llm import LLMProviderError, create_llm
 from src.logger import get_logger
 from src.retrieval.search import retrieve_chunks
+from src.tables import table_to_markdown
 from src.tracing import summarize_chunks
 
 logger = get_logger(__name__)
@@ -136,6 +137,8 @@ def _system_prompt(with_figures: bool) -> str:
 def _chunk_text(chunk: Document, chunk_number: int) -> str:
     """One chunk as prompt text: its document, summary, original text and tables.
 
+    Tables are sent as Markdown (see ``src/tables.py``).
+
     A chunk with no tables or figures was stored with its original text as
     its summary, so the text is written once.
     """
@@ -148,7 +151,8 @@ def _chunk_text(chunk: Document, chunk_number: int) -> str:
         lines.append(f"Summary:\n{summary}")
     if raw_text:
         lines.append(f"Text:\n{raw_text}")
-    for number, table in enumerate(content["tables_html"], start=1):
+    tables = [markdown for markdown in map(table_to_markdown, content["tables_html"]) if markdown]
+    for number, table in enumerate(tables, start=1):
         lines.append(f"Table {number}:\n{table}")
     return "\n\n".join(lines)
 

@@ -128,3 +128,12 @@ def test_prompt_names_the_document_and_asks_for_chunk_specific_text(monkeypatch)
     assert "DOCUMENT: ne555: NE555 SLFS022K" in prompt
     assert "Do not repeat facts about the whole document" in prompt
     assert "CHUNK TEXT:\npin 1 GND" in prompt
+
+
+def test_prompt_sends_tables_as_markdown(monkeypatch):
+    bodies = _server(monkeypatch, lambda r: _reply("summary"))
+    client = enrich.create_enhancement_client("local")
+    table = "<table><tr><th>Pin</th><th>Name</th></tr><tr><td>1</td><td>GND</td></tr></table>"
+    create_ai_enhanced_summary(client, "pins", [table], [], "local")
+    prompt = bodies[0]["messages"][0]["content"][0]["text"]
+    assert "TABLE 1:\n| Pin | Name |\n|---|---|\n| 1 | GND |" in prompt

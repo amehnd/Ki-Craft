@@ -56,6 +56,8 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **Page decoration.** What is printed on every page rather than written about the content: the running header (part numbers, document number, revision date), the footer, page numbers and the vendor logo. `src/ingestion/extract.py:remove_page_decoration` drops it before chunking. Headers and footers go by the type `unstructured` gives them; an image is a logo when its OCR text is short (6 words or fewer) and either repeats on 3 or more pages or contains a vendor name from `PDF_LOGO_WORDS` (OCR sometimes reads only part of a logo, such as "instruments").
 
+**Merged cells (rowspan, colspan).** An HTML table cell can cover several rows (`rowspan`) or columns (`colspan`), as a "MIN/TYP/MAX" header often does in a datasheet. Markdown tables cannot merge cells, so `src/tables.py:table_to_markdown` repeats a merged value in every cell it covers, and stops a `rowspan` at the end of its section (`thead`, `tbody`), as a browser does. Tables are stored as HTML and turned into Markdown only for prompts, where they take about 30 percent fewer tokens.
+
 **Chunking by title.** Grouping elements into chunks that start at each section heading, so a chunk follows the document's own sections. `src/ingestion/chunk.py`.
 
 **Coordinates (bounding box).** The rectangle an element occupies on its page. `unstructured` reports it as four corner points plus the coordinate system (for example `PixelSpace` with the page rendered at 2125 x 2750). Needed for cropping figures and for highlighted citations.

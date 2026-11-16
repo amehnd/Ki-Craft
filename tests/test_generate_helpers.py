@@ -179,7 +179,14 @@ def test_each_chunk_carries_its_document_summary_text_and_tables():
     assert prompt.index("CONTEXT") < prompt.index("[Chunk 1] Document: lm317") < prompt.index("QUESTION: pins?")
     assert "Summary:\nSummary of pins" in prompt
     assert "Text:\nPin 1 ADJ" in prompt
-    assert "Table 1:\n<table>t</table>" in prompt
+    assert "Table" not in prompt, "a table with no cells is skipped"
+
+
+def test_tables_reach_the_answer_prompt_as_markdown():
+    table = "<table><tr><th>Pin</th><th>Name</th></tr><tr><td>1</td><td>ADJ</td></tr></table>"
+    prompt = _text(_build_message_content([_chunk("s", [], tables=[table])], "q", []))
+    assert "Table 1:\n| Pin | Name |\n|---|---|\n| 1 | ADJ |" in prompt
+    assert "<table>" not in prompt
 
 
 def test_a_text_only_chunk_is_written_once():
