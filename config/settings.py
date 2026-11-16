@@ -18,6 +18,16 @@ from dotenv import load_dotenv
 # Load secrets from a .env file if present (safe to call multiple times).
 load_dotenv()
 
+# LangSmith tracing has one switch here: LANGSMITH_TRACING, falling back to the
+# legacy LANGCHAIN_TRACING_V2. The langsmith library reads *_TRACING_V2 before
+# *_TRACING, so without this a LANGCHAIN_TRACING_V2=true in .env would win over
+# LANGSMITH_TRACING=false. Writing the decision to LANGSMITH_TRACING_V2, the
+# name langsmith checks first, makes it final.
+LANGSMITH_TRACING: bool = (
+    (os.getenv("LANGSMITH_TRACING") or os.getenv("LANGCHAIN_TRACING_V2") or "false").strip().lower() == "true"
+)
+os.environ["LANGSMITH_TRACING_V2"] = "true" if LANGSMITH_TRACING else "false"
+
 
 def _env_choice(name: str, default: str, allowed: tuple[str, ...]) -> str:
     """Read ``name`` from the environment and check it is one of ``allowed``.

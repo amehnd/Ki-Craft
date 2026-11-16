@@ -209,7 +209,7 @@ WATSONX_URL=https://eu-de.ml.cloud.ibm.com
 | `API_BASE_URL` | Dashboard | Where the dashboard finds the API; defaults to `http://localhost:8000` |
 | `CORS_ALLOWED_ORIGINS` | API | Comma-separated origins allowed to call the API from a browser |
 | `GENERATION_MAX_TOKENS` | API | Output token limit per answer; defaults to 512 |
-| `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT` | Optional tracing | Leave unset to run without tracing |
+| `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT` | Optional tracing | Leave unset to run without tracing. `LANGSMITH_TRACING=false` turns tracing off even when `.env` has the older `LANGCHAIN_TRACING_V2=true` |
 | `UNSTRUCTURED_API_KEY`, `UNSTRUCTURED_URL` | Not used by the code yet | For Unstructured's hosted Parse API, the planned production parser |
 
 ## Running the API

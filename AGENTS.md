@@ -158,7 +158,7 @@ Notes:
 
 ## Environment variables
 
-`GEMINI_API_KEY`, `HF_TOKEN`, `WATSONX_API_KEY`, `WATSONX_PROJECT_ID`, `WATSONX_URL`, `API_BASE_URL`, `CORS_ALLOWED_ORIGINS`, `GENERATION_MAX_TOKENS`, and the LangSmith variables (`LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`). See `config/settings.py` for defaults.
+`GEMINI_API_KEY`, `HF_TOKEN`, `WATSONX_API_KEY`, `WATSONX_PROJECT_ID`, `WATSONX_URL`, `API_BASE_URL`, `CORS_ALLOWED_ORIGINS`, `GENERATION_MAX_TOKENS`, and the LangSmith variables (`LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`). See `config/settings.py` for defaults. `LANGSMITH_TRACING` is the one tracing switch: when it is unset the legacy `LANGCHAIN_TRACING_V2` is used, and `config/settings.py` writes the result to `LANGSMITH_TRACING_V2`, which the langsmith library checks first.
 
 Also present in `.env` for the hosted parser: `UNSTRUCTURED_API_KEY` and `UNSTRUCTURED_URL` (the v2 Transform API). A planned `PARSER_BACKEND` (`local` in development, `hosted` in production) will choose between local hi_res and the hosted Parse API; see `docs/TRADEOFFS.md`, section 1.
 
