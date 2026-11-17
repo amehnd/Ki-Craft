@@ -21,8 +21,8 @@ from config.settings import (
     RETRIEVAL_SCORE_THRESHOLD,
     RETRIEVAL_SEARCH_TYPE,
 )
+from src.documents import chunk_text_and_tables, stored_image_count
 from src.logger import get_logger
-from src.tracing import summarize_chunks
 
 logger = get_logger(__name__)
 
@@ -98,9 +98,8 @@ def retrieve_chunks(retriever, query: str) -> list[Document]:
         List of retrieved document chunks.
     """
     chunks = retriever.invoke(query)
-    chunk_summaries = summarize_chunks(chunks)
-    total_images = sum(c.get("image_count", 0) for c in chunk_summaries)
-    total_tables = sum(c.get("table_count", 0) for c in chunk_summaries)
+    total_images = sum(stored_image_count(chunk) for chunk in chunks)
+    total_tables = sum(len(chunk_text_and_tables(chunk)["tables_html"]) for chunk in chunks)
     logger.info(
         "Retrieved %d chunks (%d images, %d tables)",
         len(chunks),

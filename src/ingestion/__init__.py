@@ -1,34 +1,7 @@
-"""Ingestion package.
+"""Offline package: PDF to chunks, summaries and Chroma records.
 
-Exposes the full ingestion pipeline and its individual steps so callers can
-either run everything (:func:`run_complete_ingestion_pipeline`) or invoke a
-single stage in isolation.
+``extract.py`` partitions the PDF, ``chunk.py`` groups elements by title,
+``enrich.py`` writes a summary per chunk, ``export.py`` saves the JSON export
+and ``pipeline.py`` runs the steps and writes the store. Import from those
+modules directly; this file only marks the folder as a package.
 """
-
-from src.ingestion.chunk import create_chunks_by_title
-from src.ingestion.enrich import (
-    create_ai_enhanced_summary,
-    separate_content_types,
-    summarise_chunks,
-)
-from src.ingestion.export import export_chunks_to_json
-from src.ingestion.extract import partition_document
-from src.ingestion.pipeline import (
-    create_vector_store,
-    documents_from_export,
-    run_complete_ingestion_pipeline,
-    store_export,
-)
-
-__all__ = [
-    "partition_document",
-    "create_chunks_by_title",
-    "separate_content_types",
-    "create_ai_enhanced_summary",
-    "summarise_chunks",
-    "export_chunks_to_json",
-    "documents_from_export",
-    "create_vector_store",
-    "run_complete_ingestion_pipeline",
-    "store_export",
-]

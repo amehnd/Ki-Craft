@@ -1,23 +1,6 @@
-"""Retrieval package.
+"""Query-time package: retrieve chunks, build the prompt, stream the answer.
 
-Exposes vector store loading, retrieval and answer generation so the UI and
-CLI can build a full RAG query in a few calls.
+``search.py`` finds the chunks, ``prompt.py`` turns them into messages, and
+``generate.py`` runs the two and streams the model's answer. Import from
+those modules directly; this file only marks the folder as a package.
 """
-
-from src.retrieval.generate import (
-    answer_query_stream,
-    generate_answer_stream,
-)
-from src.retrieval.search import (
-    build_retriever,
-    load_vector_store,
-    retrieve_chunks,
-)
-
-__all__ = [
-    "load_vector_store",
-    "build_retriever",
-    "retrieve_chunks",
-    "generate_answer_stream",
-    "answer_query_stream",
-]

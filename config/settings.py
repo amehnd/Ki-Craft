@@ -44,7 +44,6 @@ def _env_choice(name: str, default: str, allowed: tuple[str, ...]) -> str:
 # API credentials (loaded from environment / .env)
 GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
 HF_TOKEN: str = os.getenv("HF_TOKEN", "")
-HUGGINGFACEHUB_API_TOKEN: str = os.getenv("HUGGINGFACEHUB_API_TOKEN", "")
 WATSONX_API_KEY: str = os.getenv("WATSONX_API_KEY", "")
 WATSONX_PROJECT_ID: str = os.getenv("WATSONX_PROJECT_ID", "")
 # Regional watsonx.ai endpoint; must be the region the project lives in.

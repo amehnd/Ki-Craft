@@ -84,17 +84,6 @@ CORE_STACK: list[str] = [
     "Hugging Face",
 ]
 
-SUPPORT_STACK: list[str] = [
-    "unstructured",
-    "Granite Embeddings",
-    "MMR Retrieval",
-    "Pandas",
-    "Plotly",
-    "SSE Streaming",
-    "Docker",
-    "pytest",
-]
-
 # (step, title, body, tags)
 PIPELINE_STEPS: list[tuple[str, str, str, list[str]]] = [
     (

@@ -25,7 +25,7 @@ def test_get_provider_unknown_returns_none():
 def test_get_model_known():
     model = get_model("gemini", "gemini-3.5-flash-lite")
     assert model is not None
-    assert model.context_window > 0
+    assert model.id == "gemini-3.5-flash-lite"
 
 
 def test_get_model_unknown_returns_none():

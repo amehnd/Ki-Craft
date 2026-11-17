@@ -25,7 +25,6 @@ from src.llm import LLMProviderError
 from src.logger import get_logger
 from src.retrieval.prompt import PromptFigure, build_messages, prompt_stats, select_figures
 from src.retrieval.search import retrieve_chunks
-from src.tracing import summarize_chunks
 
 logger = get_logger(__name__)
 
@@ -246,20 +245,6 @@ def generate_answer_stream(
     if usage is None:
         usage = {}
 
-    chunk_summaries = summarize_chunks(chunks)
-    total_images = sum(c.get("image_count", 0) for c in chunk_summaries)
-    total_tables = sum(c.get("table_count", 0) for c in chunk_summaries)
-
-    logger.info("  %d chunks received by generation", len(chunks))
-    for ci, (c, summary) in enumerate(zip(chunks, summarize_chunks(chunks, max_preview=len(chunks)))):
-        logger.debug(
-            "    Chunk %d: summary=%d chars, tables=%d, images=%d",
-            ci + 1,
-            len(c.page_content or ""),
-            summary["table_count"],
-            summary["image_count"],
-        )
-
     messages = build_messages(chunks, query, list(figures))
 
     prompt_chars, prompt_images = prompt_stats(messages[1].content)
@@ -274,10 +259,10 @@ def generate_answer_stream(
     )
 
     logger.info(
-        "LangSmith trace: %d chunks, %d images, %d tables",
+        "Prompt: %d chunks, %d figures, %d characters of text",
         len(chunks),
-        total_images,
-        total_tables,
+        prompt_images,
+        prompt_chars,
     )
 
     start = time.perf_counter()
