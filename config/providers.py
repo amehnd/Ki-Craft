@@ -11,9 +11,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-# ---------------------------------------------------------------------------
-# Provider and model definitions
-# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class ModelInfo:
@@ -50,7 +47,7 @@ class ProviderInfo:
     description: str = ""
 
 
-# ---- Google Gemini ----
+# Google Gemini
 GEMINI_MODELS = (
     ModelInfo(
         id="gemini-3.7-flash",
@@ -150,7 +147,7 @@ GEMINI_MODELS = (
     ),
 )
 
-# ---- Groq (models confirmed to answer on 2026-11-13) ----
+# Groq (models confirmed to answer on 2026-11-13)
 GROQ_MODELS = (
     ModelInfo(
         id="openai/gpt-oss-120b",
@@ -188,7 +185,7 @@ GROQ_MODELS = (
     ),
 )
 
-# ---- Hugging Face Inference Providers (OpenAI-compatible router) ----
+# Hugging Face Inference Providers (OpenAI-compatible router)
 # These use the HF router at https://router.huggingface.co/v1 with HF token
 HF_MODELS = (
     ModelInfo(
@@ -250,7 +247,7 @@ HF_MODELS = (
     ),
 )
 
-# ---- OpenAI ----
+# OpenAI
 OPENAI_MODELS = (
     ModelInfo(
         id="gpt-4o",
@@ -352,7 +349,7 @@ OPENAI_MODELS = (
     ),
 )
 
-# ---- Registry ----
+# Registry
 ALL_PROVIDERS: tuple[ProviderInfo, ...] = (
     ProviderInfo(
         id="gemini",

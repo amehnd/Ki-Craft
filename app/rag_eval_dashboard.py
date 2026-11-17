@@ -15,9 +15,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-# ---------------------------------------------------------------------------
 # Page config
-# ---------------------------------------------------------------------------
 st.set_page_config(page_title="RAG Evaluation Dashboard", layout="wide")
 
 st.markdown(
@@ -35,9 +33,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ---------------------------------------------------------------------------
 # Constants
-# ---------------------------------------------------------------------------
 DATA_PATH = Path(__file__).resolve().parent.parent / "evals" / "testing.json"
 
 GRADE_ORDER = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D", "D-", "F"]
@@ -45,9 +41,7 @@ GRADE_ORDER = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D", "D-
 RETRIEVAL_METRICS = ["relevance", "coverage", "ranking", "redundancy", "noise"]
 GENERATION_METRICS = ["correctness", "faithfulness", "completeness", "conciseness"]
 
-# ---------------------------------------------------------------------------
 # Data loading
-# ---------------------------------------------------------------------------
 
 @st.cache_data
 def load_data(path: str) -> list[dict]:
@@ -78,9 +72,7 @@ def has_contamination(raw) -> bool:
     return len(set(extract_doc_names(raw))) > 1
 
 
-# ---------------------------------------------------------------------------
 # Sidebar filters
-# ---------------------------------------------------------------------------
 
 def render_sidebar(data: list[dict]) -> list[dict]:
     result = list(data)
@@ -131,9 +123,7 @@ def render_sidebar(data: list[dict]) -> list[dict]:
     return filtered
 
 
-# ---------------------------------------------------------------------------
 # Summary cards
-# ---------------------------------------------------------------------------
 
 def render_summary(data: list[dict]) -> None:
     if not data:
@@ -154,9 +144,7 @@ def render_summary(data: list[dict]) -> None:
     c5.metric("Avg Generation Score", f"{avg_generation:.1f}")
 
 
-# ---------------------------------------------------------------------------
 # Score distribution charts
-# ---------------------------------------------------------------------------
 
 def render_score_charts(data: list[dict]) -> None:
     if not data:
@@ -164,7 +152,7 @@ def render_score_charts(data: list[dict]) -> None:
 
     st.subheader("Score Distribution")
 
-    # --- Bar chart: overall score per question ---
+    # Bar chart: overall score per question
     df_scores = pd.DataFrame(
         [
             {
@@ -193,7 +181,7 @@ def render_score_charts(data: list[dict]) -> None:
     fig_bar.update_layout(yaxis_range=[0, 105], xaxis_tickangle=-45)
     st.plotly_chart(fig_bar, use_container_width=True)
 
-    # --- Grouped bar: retrieval vs generation ---
+    # Grouped bar: retrieval vs generation
     df_compare = pd.DataFrame(
         [
             {
@@ -231,7 +219,7 @@ def render_score_charts(data: list[dict]) -> None:
     )
     st.plotly_chart(fig_grouped, use_container_width=True)
 
-    # --- Histogram of grade distribution ---
+    # Histogram of grade distribution
     grade_counts = Counter(r["overall"]["grade"] for r in data)
     df_grades = pd.DataFrame(
         [
@@ -255,9 +243,7 @@ def render_score_charts(data: list[dict]) -> None:
     st.plotly_chart(fig_hist, use_container_width=True)
 
 
-# ---------------------------------------------------------------------------
 # Retrieval metrics breakdown
-# ---------------------------------------------------------------------------
 
 def render_retrieval_metrics(data: list[dict]) -> None:
     if not data:
@@ -270,7 +256,7 @@ def render_retrieval_metrics(data: list[dict]) -> None:
     for m in RETRIEVAL_METRICS:
         avg_metrics[m] = sum(r["retrieval"]["metrics"][m] for r in data) / len(data)
 
-    # --- Radar chart ---
+    # Radar chart
     categories = RETRIEVAL_METRICS + [RETRIEVAL_METRICS[0]]
     values = [avg_metrics[m] for m in RETRIEVAL_METRICS] + [avg_metrics[RETRIEVAL_METRICS[0]]]
 
@@ -306,7 +292,7 @@ def render_retrieval_metrics(data: list[dict]) -> None:
     fig_ret_bar.update_layout(showlegend=False, yaxis_range=[0, 5.5])
     st.plotly_chart(fig_ret_bar, use_container_width=True)
 
-    # --- Documents table ---
+    # Documents table
     st.markdown("**Retrieved Documents per Question**")
     doc_rows = []
     for r in data:
@@ -330,9 +316,7 @@ def render_retrieval_metrics(data: list[dict]) -> None:
     )
 
 
-# ---------------------------------------------------------------------------
 # Generation metrics breakdown
-# ---------------------------------------------------------------------------
 
 def render_generation_metrics(data: list[dict]) -> None:
     if not data:
@@ -345,7 +329,7 @@ def render_generation_metrics(data: list[dict]) -> None:
     for m in GENERATION_METRICS:
         avg_metrics[m] = sum(r["generation"]["metrics"][m] for r in data) / len(data)
 
-    # --- Radar chart ---
+    # Radar chart
     categories = GENERATION_METRICS + [GENERATION_METRICS[0]]
     values = [avg_metrics[m] for m in GENERATION_METRICS] + [avg_metrics[GENERATION_METRICS[0]]]
 
@@ -381,7 +365,7 @@ def render_generation_metrics(data: list[dict]) -> None:
     fig_gen_bar.update_layout(showlegend=False, yaxis_range=[0, 5.5])
     st.plotly_chart(fig_gen_bar, use_container_width=True)
 
-    # --- Image Utilization ---
+    # Image Utilization
     st.markdown("**Image Utilization**")
     img_vals = [r["generation"]["metrics"]["image_utilization"] for r in data]
     na_count = sum(1 for v in img_vals if v is None or v == "NA" or v == "N/A")
@@ -415,9 +399,7 @@ def render_generation_metrics(data: list[dict]) -> None:
         st.plotly_chart(fig_img, use_container_width=True)
 
 
-# ---------------------------------------------------------------------------
 # Failure / weak-spot analysis
-# ---------------------------------------------------------------------------
 
 def render_failure_analysis(data: list[dict]) -> None:
     if not data:
@@ -484,9 +466,7 @@ def render_failure_analysis(data: list[dict]) -> None:
         st.plotly_chart(fig_wc, use_container_width=True)
 
 
-# ---------------------------------------------------------------------------
 # Detail drill-down
-# ---------------------------------------------------------------------------
 
 def render_detail_drilldown(data: list[dict]) -> None:
     if not data:
@@ -503,7 +483,7 @@ def render_detail_drilldown(data: list[dict]) -> None:
 
     record = next(r for r in data if r["id"] == selected_id)
 
-    # --- Colored badge ---
+    # Colored badge
     status = record["overall"]["status"]
     grade = record["overall"]["grade"]
     score = record["overall"]["score"]
@@ -512,17 +492,17 @@ def render_detail_drilldown(data: list[dict]) -> None:
         f"### :{badge_color}[{status}] — Grade: {grade} — Score: {score}/100"
     )
 
-    # --- Question & Answer ---
+    # Question & Answer
     st.markdown(f"**Question:** {record['question']}")
     st.markdown(f"**Model Answer:** {record['generation']['model_answer']}")
     st.markdown(f"**Answer Summary:** {record['generation']['answer_summary']}")
 
-    # --- Retrieved Documents ---
+    # Retrieved Documents
     raw_docs = record["retrieval"]["retrieved_documents"]
     st.markdown(f"**Retrieved Documents:** {normalise_retrieved_docs(raw_docs)}")
     st.markdown(f"**Retrieval Summary:** {record['retrieval']['retrieved_summary']}")
 
-    # --- Metrics tables ---
+    # Metrics tables
     col1, col2 = st.columns(2)
 
     with col1:
@@ -545,7 +525,7 @@ def render_detail_drilldown(data: list[dict]) -> None:
         st.dataframe(gen_df, hide_index=True, use_container_width=True)
         st.metric("Generation Score", f"{record['generation']['generation_score']}/100")
 
-    # --- Strengths & Weaknesses ---
+    # Strengths & Weaknesses
     col3, col4 = st.columns(2)
     with col3:
         st.markdown("**Strengths**")
@@ -556,14 +536,12 @@ def render_detail_drilldown(data: list[dict]) -> None:
         for w in record["diagnosis"]["weaknesses"]:
             st.markdown(f"- {w}")
 
-    # --- Diagnosis ---
+    # Diagnosis
     st.markdown(f"**Root Cause:** {record['diagnosis']['root_cause']}")
     st.markdown(f"**Suggested Fix:** {record['diagnosis']['suggested_fix']}")
 
 
-# ---------------------------------------------------------------------------
 # Main
-# ---------------------------------------------------------------------------
 
 def main() -> None:
     st.title("RAG Evaluation Dashboard")

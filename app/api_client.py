@@ -19,6 +19,7 @@ _REQUEST_TIMEOUT = 300
 
 
 def _url(path: str) -> str:
+    """The full backend URL for an API path such as ``/v1/query``."""
     return f"{API_BASE_URL.rstrip('/')}{path}"
 
 

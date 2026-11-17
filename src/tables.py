@@ -23,6 +23,7 @@ class _TableCells(HTMLParser):
     """Collect each row's cells as ``(text, rowspan, colspan)``, and each row's section."""
 
     def __init__(self) -> None:
+        """Start with no rows and outside any cell."""
         super().__init__()
         self.rows: list[list[tuple[str, int, int]]] = []
         self.sections: list[int] = []
@@ -31,6 +32,7 @@ class _TableCells(HTMLParser):
         self._span = (1, 1)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Open a section, a row, or a cell with its rowspan and colspan."""
         if tag in ("thead", "tbody", "tfoot"):
             self._section += 1
         elif tag == "tr":
@@ -42,6 +44,7 @@ class _TableCells(HTMLParser):
             self._span = (_span(values.get("rowspan")), _span(values.get("colspan")))
 
     def handle_endtag(self, tag: str) -> None:
+        """Close a cell and add its whitespace-collapsed text to the current row."""
         if tag in ("td", "th") and self._cell is not None:
             if not self.rows:
                 self.rows.append([])
@@ -50,6 +53,7 @@ class _TableCells(HTMLParser):
             self._cell = None
 
     def handle_data(self, data: str) -> None:
+        """Keep text only while inside a cell."""
         if self._cell is not None:
             self._cell.append(data)
 
