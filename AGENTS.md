@@ -44,7 +44,7 @@ After each change, write the walkthrough like this:
 Start: api/routers/query.py:query()          the HTTP entry point
   -> api/service.py:RAGService.answer()      loads the store once, retrieves
   -> src/retrieval/search.py:retrieve_chunks()  returns list[Document]
-  -> src/retrieval/generate.py:generate_answer_stream() builds the prompt, streams the LLM
+  -> src/retrieval/generate.py:generate_answer_stream() builds the prompt (prompt.py), streams the LLM
 Data: QueryRequest -> list[Document] (metadata: raw_text, tables_html, image_paths) -> str answer -> QueryResponse
 Try: set a breakpoint in X, or run the command below, and look at Y.
 ```
@@ -88,7 +88,7 @@ The owner wants depth here. At each hop, also explain from first principles what
 config/settings.py      every tunable and environment variable
 config/providers.py     catalogue of LLM providers and models the query llm object accepts
 src/embed.py            the one embedding factory (IBM watsonx Granite, 768 dims)
-src/llm.py              the one chat model factory: catalogue entry -> LangChain client
+src/llm.py              the one chat model factory: catalogue entry -> LangChain client; default_llm
 src/ingestion/          offline pipeline: PDF -> elements -> chunks -> summaries -> Chroma
   extract.py              unstructured partition_pdf (hi_res, tables, images); drops headers, footers, logos
   chunk.py                chunk_by_title
@@ -97,7 +97,8 @@ src/ingestion/          offline pipeline: PDF -> elements -> chunks -> summaries
   pipeline.py             export -> records with figure files; runs the steps and writes Chroma
 src/retrieval/
   search.py               load Chroma, build the MMR retriever, retrieve
-  generate.py             build the multimodal prompt, call Gemini, stream, trace
+  prompt.py               build the multimodal prompt, choose and label the figures
+  generate.py             retrieve, stream the answer from the model, count tokens, price, trace
 src/documents.py        turns stored chunk metadata back into text, tables, images
 src/tracing.py          LangSmith helpers
 api/main.py             FastAPI app: CORS, lifespan, include_router calls
@@ -231,17 +232,17 @@ Each checkpoint is a set of small commits. Finish one, let the owner test and pu
 - Real HTTP errors. Done 2026-11-15: `src/llm.py` defines `LLMProviderError` (502) and `UnknownModelError` (422 with an unknown provider or model). `api/service.py` defines `StoreUnavailableError` (503, also on `/health`). Unexpected errors before a response starts are a 500 with `"Internal server error"` as the detail.
 - Streaming POST migration. Done 2026-11-16. Both query routes take `QueryRequest`, including the optional `llm` object. `POST /v1/query/stream` waits for the first answer fragment, so a provider failure before it returns HTTP 502. Failures after the headers are sent end the stream with an `error` event carrying `status` and `message`.
 - Trace structure (done 2026-11-15). `answer_query_stream` and `generate_answer_stream` are real generators, so LangSmith keeps each run open until the last token and records the answer as its output. `_StreamWrapper` is gone, `GenerateAnswerStream` is a `chain` run, and LangChain's own model run is the only `llm` run. Trace inputs hold only the question and settings; the model id is run metadata, and the chat model object (which holds the caller's key) is never recorded.
-- Return the figures the model actually saw. Add `figures` to the `/v1/query` response (and the `done` stream event): the image URLs sent in the prompt, in prompt order, each with its chunk and source document. Label each image in the prompt (`Figure F1, from <document>, chunk <n>`) so the model can cite `[F1]`. This is the baseline for citations; see Later phases for highlighted text. Done 2026-11-16: `src/retrieval/generate.py:select_figures` chooses the figures once (an unreadable figure takes no label or slot), and that one choice builds the prompt, the trace attachments (only the sent figures, named `F1`, `F2`, ...) and the `figures` list (`label`, `url`, `chunk_id`, `source`) in `/v1/query` and the `done` event. Figures carry their file path, not bytes: the bytes are read only for the model request and the trace attachment, and the prompt, like the image endpoint, uses only files inside `IMAGES_DIR` (`src/documents.py:image_file`).
+- Return the figures the model actually saw. Add `figures` to the `/v1/query` response (and the `done` stream event): the image URLs sent in the prompt, in prompt order, each with its chunk and source document. Label each image in the prompt (`Figure F1, from <document>, chunk <n>`) so the model can cite `[F1]`. This is the baseline for citations; see Later phases for highlighted text. Done 2026-11-16: `src/retrieval/prompt.py:select_figures` chooses the figures once (an unreadable figure takes no label or slot), and that one choice builds the prompt, the trace attachments (only the sent figures, named `F1`, `F2`, ...) and the `figures` list (`label`, `url`, `chunk_id`, `source`) in `/v1/query` and the `done` event. Figures carry their file path, not bytes: the bytes are read only for the model request and the trace attachment, and the prompt, like the image endpoint, uses only files inside `IMAGES_DIR` (`src/documents.py:image_file`).
 
-**Checkpoint 3. Pipeline readability and known bugs.**
-- Docstrings everywhere, remove all banner comments (about 75).
-- Split `src/retrieval/generate.py` into prompt building, the LLM factory, and streaming.
+**Checkpoint 3. Pipeline readability and known bugs.** Status: every item done (2026-11-17); waiting for the owner's test and push.
+- Docstrings everywhere, remove all banner comments. Done 2026-11-17: the 55 banners left (not 75) became plain comments or were deleted, and every function in `api/`, `src/`, `config/` and `app/api_client.py` has a docstring. The two dashboards still miss about 50 function docstrings; they are written during the Checkpoint 4 split, which rewrites those functions.
+- Split `src/retrieval/generate.py` into prompt building, the LLM factory, and streaming. Done 2026-11-17: `src/retrieval/prompt.py` builds the messages and chooses figures (`build_messages`, `select_figures`, `prompt_stats`), `default_llm` moved to `src/llm.py` next to `create_llm`, and `generate.py` keeps retrieval-then-stream, token counting, pricing and tracing (454 lines to 302).
 - Fix:
   - only the first 5 chunks' text reaches the prompt while images come from all chunks (moved to Checkpoint 2 on 2026-11-14, done 2026-11-15);
-  - streamed usage tokens reporting 0;
-  - cost estimates hardcoded to Gemini prices.
+  - streamed usage tokens reporting 0. Done 2026-11-17, two causes. `ChatOpenAI` asks for streamed token counts (`stream_options.include_usage`) only when it talks to api.openai.com, so Groq and Hugging Face streams reported none; `create_llm` now sets `stream_usage=True`. And `ChatGoogleGenerativeAI` gives each chunk the tokens that chunk added (Gemini sends running totals and LangChain subtracts), but `_capture_usage` kept only the last chunk's numbers, so every multi-chunk Gemini stream reported 0 input tokens; it now sums the chunks. Checked against the provider docs on 2026-11-17: the Hugging Face router documents `include_usage` (one final chunk with empty `choices` and the whole request's `usage`), and the Groq SDK's chunk type has a top-level `usage`, which `ChatOpenAI` reads. Not checked live: no Hugging Face credit;
+  - cost estimates hardcoded to Gemini prices. Done 2026-11-17: `_estimate_cost` uses the answering model's prices from `config/providers.py`, and `GENERATION_INPUT_PRICE_PER_1M` and `GENERATION_OUTPUT_PRICE_PER_1M` are deleted. Those settings held Gemini 2.5 Flash-Lite's prices (0.10 and 0.40 per 1M), so even the default model, 3.5 Flash-Lite (0.30 and 2.50), was priced too low. A model whose catalogue prices are both 0 reports a null cost, not $0.
 - Corpus re-summarized 2026-11-16 with the local Qwen3.5-4B backend after page cleanup (AN699, lm2596, lm317, lm555, tlv1117; ne555 was already done) and replaced in `dbv2` with `--replace`: 310 records and 276 figures, longest summary 474 words (was 1,523, past the embedder's 512-token limit).
-- Answer prompt rewritten 2026-11-16 (`src/retrieval/generate.py:_build_messages`). A system message holds the rules: answer only from the context, say when the documents do not state it, never mix values from different documents, keep units and conditions, cite figures as `[F1]`. The user message gives each chunk's document name, summary, original text (`raw_text`, previously never sent) and tables, each figure right after its chunk, and the question last. On three live questions it stopped presenting the LM555 diagram as the NE555's and gave the LM317 reference voltage range (1.2, 1.25, 1.3 V) where it had invented a 4.95 V maximum; prompts are about 40 to 70 percent longer.
+- Answer prompt rewritten 2026-11-16 (`src/retrieval/prompt.py:build_messages`). A system message holds the rules: answer only from the context, say when the documents do not state it, never mix values from different documents, keep units and conditions, cite figures as `[F1]`. The user message gives each chunk's document name, summary, original text (`raw_text`, previously never sent) and tables, each figure right after its chunk, and the question last. On three live questions it stopped presenting the LM555 diagram as the NE555's and gave the LM317 reference voltage range (1.2, 1.25, 1.3 V) where it had invented a 4.95 V maximum; prompts are about 40 to 70 percent longer.
 - Tables in prompts are Markdown since 2026-11-16 (`src/tables.py:table_to_markdown`, used by the answer and summary prompts). Unstructured has no Markdown table output, so tables stay stored as HTML (lossless, rendered by the dashboard) and are converted only when a prompt is built: 32 percent fewer tokens across the 118 stored tables. Merged cells are repeated, a rowspan stops at the end of its section, and empty tables are skipped.
 
 **Checkpoint 4. Frontend separation.**

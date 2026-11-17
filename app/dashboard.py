@@ -51,9 +51,7 @@ logger = get_logger(__name__)
 PAGE_TITLE = "Multimodal RAG Chunk Inspector"
 LAYOUT = "wide"
 
-# ---------------------------------------------------------------------------
 # Landing page content
-# ---------------------------------------------------------------------------
 # Shown instead of the "upload a JSON" placeholder whenever no datasheet has
 # been selected, so a first-time visitor lands on an explanation of the project
 # rather than on an empty screen.
@@ -877,7 +875,7 @@ def render_sidebar() -> None:
                 on_change=_on_filter_change,
             )
 
-        # ── LLM Provider (always visible) ──
+        # LLM Provider (always visible)
         st.divider()
         st.subheader("LLM Provider")
 
@@ -1407,9 +1405,7 @@ def page_explorer(data: list[dict]) -> None:
                 st.info("Select a chunk from the list.")
 
 
-# ---------------------------------------------------------------------------
 # Query & Retrieve page (talks to the FastAPI backend)
-# ---------------------------------------------------------------------------
 def _render_chunk_payload(payload: dict, index: int) -> None:
     """Render one retrieved chunk from an API ``ChunkPayload`` dict."""
     raw_text = payload.get("raw_text", "")
@@ -1655,9 +1651,7 @@ def render_chat_page() -> None:
     _render_usage(st.session_state.get("chat_usage"))
 
 
-# ---------------------------------------------------------------------------
 # Landing page -- full project walkthrough, shown when no datasheet is loaded
-# ---------------------------------------------------------------------------
 def _render_hero() -> None:
     buttons = "".join(
         f'<a class="mmr-btn" href="{url}" target="_blank" rel="noopener">'

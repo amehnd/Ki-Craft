@@ -27,9 +27,10 @@ from config.settings import (
 )
 from src.documents import chunk_text_and_tables, image_file, stored_image_paths
 from src.embed import load_embedding_model
-from src.llm import accepts_images
+from src.llm import accepts_images, default_llm
 from src.logger import get_logger
-from src.retrieval.generate import PromptFigure, StreamEvent, answer_query_stream, default_llm
+from src.retrieval.generate import StreamEvent, answer_query_stream
+from src.retrieval.prompt import PromptFigure
 from src.retrieval.search import build_retriever, load_vector_store, retrieve_chunks
 
 from api.schemas import ChunkPayload, FigurePayload, RetrieveResponse
@@ -52,12 +53,11 @@ class StoreUnavailableError(RuntimeError):
 class RAGService:
     """Lazily loads the vector store and exposes retrieve/answer operations."""
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """Create the service with nothing loaded; ``ensure_ready`` loads the store."""
         self._db = None
         self._retriever = None
         self._load_lock = asyncio.Lock()
-
-    # -- lifecycle ----------------------------------------------------------
 
     async def ensure_ready(self) -> None:
         """Load the vector store on first use (idempotent, thread-safe).
@@ -75,6 +75,7 @@ class RAGService:
                         raise StoreUnavailableError(f"Vector store unavailable: {exc}") from exc
 
     def _load(self) -> None:
+        """Load the embedding client, the vector store and the default retriever."""
         logger.info("Loading embedding model and vector store...")
         model = load_embedding_model()
         self._db = load_vector_store(model)
@@ -88,8 +89,6 @@ class RAGService:
         if top_k and top_k != RETRIEVAL_K:
             return build_retriever(self._db, top_k)
         return self._retriever
-
-    # -- operations ---------------------------------------------------------
 
     async def retrieve(self, query: str, top_k: int) -> RetrieveResponse:
         """Retrieve chunks for a query without generating an answer."""
@@ -118,8 +117,8 @@ class RAGService:
             max_images: Most images to send to the model (0 = all).
             llm: A chat model from ``src/llm.py:create_llm``; the default
                 Gemini model when omitted.
-            provider_id: The catalogue provider of ``llm``. Ignored when
-                ``llm`` is omitted.
+            provider_id: The catalogue provider of ``llm``, used to price
+                the answer. Ignored when ``llm`` is omitted.
             model_id: The catalogue id of ``llm``, recorded in usage. Ignored
                 when ``llm`` is omitted. With ``provider_id`` it decides
                 whether figures are sent: a text-only model gets none.
@@ -136,6 +135,7 @@ class RAGService:
             self.get_retriever(top_k),
             query,
             llm,
+            provider_id,
             model_id,
             max_images=max_images,
             send_images=accepts_images(provider_id, model_id),
@@ -163,6 +163,7 @@ class RAGService:
         await self.ensure_ready()
 
         def _run() -> tuple[str, list, list, dict]:
+            """Consume the event stream and collect each kind of event."""
             chunks: list = []
             figures: list = []
             tokens: list[str] = []
@@ -204,8 +205,6 @@ class RAGService:
         if not metadatas:
             return None
         return image_file(metadatas[0] or {}, position)
-
-    # -- payload assembly ---------------------------------------------------
 
     @staticmethod
     def to_figure_payloads(figures: list[PromptFigure]) -> list[FigurePayload]:
