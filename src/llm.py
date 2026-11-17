@@ -1,7 +1,7 @@
 """Chat model factory: builds the LangChain client for a catalogue model.
 
 Generation asks for a model by provider id and model id, both default
-(``src/retrieval/generate.py:default_llm``) and user-chosen (the ``llm``
+(:func:`default_llm`, used by ``api/service.py``) and user-chosen (the ``llm``
 object of ``POST /v1/query``, in ``api/routers/query.py``).
 This module looks both up in ``config/providers.py`` and returns a ready chat
 model. The provider's ``protocol``, not the shape of the model's name,
@@ -16,6 +16,13 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
 from config.providers import get_model, get_provider
+from config.settings import (
+    GEMINI_API_KEY,
+    GENERATION_MAX_TOKENS,
+    GENERATION_MODEL,
+    GENERATION_PROVIDER,
+    GENERATION_TEMPERATURE,
+)
 from src.logger import get_logger
 
 logger = get_logger(__name__)
@@ -97,10 +104,29 @@ def create_llm(
             **sampling,
         )
 
+    # ChatOpenAI asks for token counts in a stream (stream_options.include_usage)
+    # only when it talks to api.openai.com itself, so with Groq's and Hugging
+    # Face's base_url a streamed answer would report no tokens.
     return ChatOpenAI(
         model=model_id,
         api_key=api_key,
         base_url=provider.base_url,
         max_tokens=max_tokens,
+        stream_usage=True,
         **sampling,
+    )
+
+
+def default_llm() -> BaseChatModel:
+    """Create the default chat model configured in ``config/settings.py``.
+
+    Its model id is ``GENERATION_MODEL``, which callers pass alongside it as
+    the ``model_id`` that labels usage.
+    """
+    return create_llm(
+        GENERATION_PROVIDER,
+        GENERATION_MODEL,
+        GEMINI_API_KEY,
+        temperature=GENERATION_TEMPERATURE,
+        max_tokens=GENERATION_MAX_TOKENS,
     )

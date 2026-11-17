@@ -58,6 +58,7 @@ def test_openai_protocol_uses_the_provider_base_url(built, provider, model, base
     """The client is chosen by provider, even when a model id starts with 'openai/'."""
     llm.create_llm(provider, model, "key")
     assert built["client"] == "openai"
+    assert built["kwargs"]["stream_usage"] is True
     assert built["kwargs"]["base_url"] == base_url
     assert built["kwargs"]["model"] == model
 

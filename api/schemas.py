@@ -215,7 +215,8 @@ class UsageMetadata(BaseModel):
     """Token counts and timing of the model call.
 
     Token counts are as the provider reports them. The cost estimate uses
-    the server's configured prices and is null when none are set.
+    the answering model's prices in ``config/providers.py`` and is null when
+    the catalogue has no price for it.
     """
 
     model: str = Field(..., description="Model ID that answered.")
@@ -227,7 +228,7 @@ class UsageMetadata(BaseModel):
     prompt_images: int = Field(0, description="Figures sent in the prompt.")
     chunks_used: int = Field(0, description="Chunks sent in the prompt.")
     estimated_cost_usd: float | None = Field(
-        None, description="Estimated cost in USD; null when no prices are configured."
+        None, description="Estimated cost in USD at the model's catalogue prices; null when they are unknown."
     )
 
     model_config = ConfigDict(

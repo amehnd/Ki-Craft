@@ -41,9 +41,7 @@ def _env_choice(name: str, default: str, allowed: tuple[str, ...]) -> str:
         raise ValueError(f"{name}={value!r} is not one of: {', '.join(allowed)}")
     return value
 
-# ---------------------------------------------------------------------------
 # API credentials (loaded from environment / .env)
-# ---------------------------------------------------------------------------
 GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
 HF_TOKEN: str = os.getenv("HF_TOKEN", "")
 HUGGINGFACEHUB_API_TOKEN: str = os.getenv("HUGGINGFACEHUB_API_TOKEN", "")
@@ -52,9 +50,7 @@ WATSONX_PROJECT_ID: str = os.getenv("WATSONX_PROJECT_ID", "")
 # Regional watsonx.ai endpoint; must be the region the project lives in.
 WATSONX_URL: str = os.getenv("WATSONX_URL", "https://eu-de.ml.cloud.ibm.com")
 
-# ---------------------------------------------------------------------------
 # Model selection
-# ---------------------------------------------------------------------------
 # Embedding model (served by watsonx.ai) used to vectorise chunks during
 # ingestion and retrieval.  Changing it requires re-indexing the store.
 EMBEDDING_MODEL: str = "ibm/granite-embedding-278m-multilingual"
@@ -65,17 +61,13 @@ EMBEDDING_MAX_INPUT_TOKENS: int = 512
 GENERATION_PROVIDER: str = "gemini"
 GENERATION_MODEL: str = "gemini-3.5-flash-lite"
 
-# ---------------------------------------------------------------------------
 # Storage locations
-# ---------------------------------------------------------------------------
 CHROMA_PERSIST_DIR: str = "dbv2/chroma_db"
 IMAGES_DIR: str = "dbv2/images"
 # One chunk export per ingested document, <source>.json.
 JSON_EXPORT_DIR: str = "json"
 
-# ---------------------------------------------------------------------------
 # Retrieval settings
-# ---------------------------------------------------------------------------
 # How the vector store picks chunks for a question. These are the three
 # search types LangChain's ``as_retriever`` accepts:
 #   similarity                  the k nearest chunks by cosine similarity
@@ -104,9 +96,7 @@ RETRIEVAL_LAMBDA_MULT: float = float(os.getenv("RETRIEVAL_LAMBDA_MULT", "0.5"))
 # cosine distance the score is 1 - distance).
 RETRIEVAL_SCORE_THRESHOLD: float = float(os.getenv("RETRIEVAL_SCORE_THRESHOLD", "0.5"))
 
-# ---------------------------------------------------------------------------
 # Generation settings
-# ---------------------------------------------------------------------------
 # Sent only to models whose catalogue entry accepts a temperature.  The
 # default model (gemini-3.5-flash-lite) uses fixed sampling, so this value
 # does not reach it.
@@ -123,19 +113,7 @@ GENERATION_MAX_IMAGES: int = int(os.getenv("GENERATION_MAX_IMAGES", "3"))
 # increase if answers get truncated.  Override via env.
 GENERATION_MAX_TOKENS: int = int(os.getenv("GENERATION_MAX_TOKENS", "512"))
 
-# Per-1M-token pricing used to estimate generation cost (USD) from reported
-# usage metadata.  Override via env when using a different provider/model.
-# Defaults match gemini-2.5-flash-lite.  Set to 0 to disable the estimate.
-GENERATION_INPUT_PRICE_PER_1M: float = float(
-    os.getenv("GENERATION_INPUT_PRICE_PER_1M", "0.10")
-)
-GENERATION_OUTPUT_PRICE_PER_1M: float = float(
-    os.getenv("GENERATION_OUTPUT_PRICE_PER_1M", "0.40")
-)
-
-# ---------------------------------------------------------------------------
 # PDF extraction settings (unstructured partition_pdf)
-# ---------------------------------------------------------------------------
 PDF_STRATEGY: str = "hi_res"
 PDF_EXTRACT_IMAGE_BLOCK_TYPES: list[str] = ["Image"]
 PDF_INFER_TABLE_STRUCTURE: bool = True
@@ -153,17 +131,13 @@ PDF_LOGO_WORDS: tuple[str, ...] = tuple(
     if word.strip()
 )
 
-# ---------------------------------------------------------------------------
 # Chunking settings (unstructured chunk_by_title)
-# ---------------------------------------------------------------------------
 CHUNK_MAX_CHARACTERS: int = 3000
 CHUNK_NEW_AFTER_N_CHARS: int = 2400
 CHUNK_COMBINE_UNDER_N_CHARS: int = 500
 CHUNK_ISOLATE_TABLES: bool = False
 
-# ---------------------------------------------------------------------------
 # Enhancement (AI summary) settings
-# ---------------------------------------------------------------------------
 # Which vision model writes the chunk summaries during ingestion. Both speak
 # the OpenAI chat protocol:
 #   huggingface: GLM-4.5V through the Hugging Face router (needs HF_TOKEN and credit);
@@ -201,9 +175,7 @@ LOCAL_ENHANCEMENT_REPETITION_PENALTY: float = float(os.getenv("LOCAL_ENHANCEMENT
 # Off: the summary is the whole answer, and reasoning would spend max_tokens.
 LOCAL_ENHANCEMENT_THINKING: bool = os.getenv("LOCAL_ENHANCEMENT_THINKING", "false").lower() == "true"
 
-# ---------------------------------------------------------------------------
 # API server
-# ---------------------------------------------------------------------------
 # Base URL of the FastAPI backend.  The Streamlit dashboard talks to this
 # instead of loading the vector store itself.  Override in .env / secrets
 # when the backend runs elsewhere (e.g. a deployed URL).
@@ -218,7 +190,5 @@ CORS_ALLOWED_ORIGINS: list[str] = [
     o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", _CORS_DEFAULT).split(",") if o.strip()
 ]
 
-# ---------------------------------------------------------------------------
 # Vector store settings
-# ---------------------------------------------------------------------------
 CHROMA_COLLECTION_METADATA: dict = {"hnsw:space": "cosine"}

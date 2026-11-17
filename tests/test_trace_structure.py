@@ -69,7 +69,7 @@ def _run_query() -> tuple[list, dict[str, dict]]:
     client = _RecordingClient()
     llm = GenericFakeChatModel(messages=iter([AIMessage(content=ANSWER)]))
     with tracing_context(enabled=True, client=client, project_name="test"):
-        stream = generate.answer_query_stream(_FakeRetriever(), "LM555 pins?", llm, "test-model")
+        stream = generate.answer_query_stream(_FakeRetriever(), "LM555 pins?", llm, "gemini", "test-model")
         events = []
         with ThreadPoolExecutor(2) as pool:
             while (item := pool.submit(contextvars.copy_context().run, next, stream, None).result()) is not None:
@@ -122,6 +122,7 @@ def test_inputs_hold_the_question_and_metadata_holds_the_model():
     assert root["inputs"]["question"] == "LM555 pins?"
     assert "llm" not in root["inputs"] and "model_id" not in root["inputs"]
     assert root["extra"]["metadata"]["model"] == "test-model"
+    assert root["extra"]["metadata"]["provider"] == "gemini"
     assert "GenericFakeChatModel" not in json.dumps(root["inputs"], default=str)
 
 
@@ -134,7 +135,7 @@ def test_a_failed_generation_is_recorded_as_an_error():
     client = _RecordingClient()
     llm = GenericFakeChatModel(messages=iter([AIMessage(content="")]))
     with tracing_context(enabled=True, client=client, project_name="test"):
-        stream = generate.answer_query_stream(_FakeRetriever(), "LM555 pins?", llm, "test-model")
+        stream = generate.answer_query_stream(_FakeRetriever(), "LM555 pins?", llm, "gemini", "test-model")
         with pytest.raises(LLMProviderError, match="The model provider failed"):
             for _ in stream:
                 pass
@@ -179,7 +180,7 @@ def test_api_key_never_reaches_the_trace_or_logs(monkeypatch, caplog, status):
     llm = create_llm("groq", "openai/gpt-oss-20b", SECRET_KEY)
 
     with tracing_context(enabled=True, client=client, project_name="test"):
-        stream = generate.answer_query_stream(_FakeRetriever(), "LM555 pins?", llm, "openai/gpt-oss-20b")
+        stream = generate.answer_query_stream(_FakeRetriever(), "LM555 pins?", llm, "groq", "openai/gpt-oss-20b")
         if status == 200:
             assert ("token", "Pin 1 is GND.") in list(stream)
         else:

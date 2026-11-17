@@ -1,43 +1,30 @@
-"""Answer generation using a multimodal LLM.
+"""Answer generation: retrieve, build the prompt, stream the model's answer.
 
-Builds the prompt from retrieved chunks (a system message with the rules,
-then each chunk's document name, summary, original text, tables (as Markdown) and
-figures, then the question), streams an answer from the chat model it is
-given, and wraps
-both retrieval and generation under a single LangSmith trace so the whole
-query shows up as one run in the UI. The default model and a user-chosen
-model share this one path; only the ``llm`` passed in differs.
+The query path's last step. ``answer_query_stream`` retrieves chunks
+(``src/retrieval/search.py``), chooses figures and builds the messages
+(``src/retrieval/prompt.py``), then streams the answer from the chat model
+it is given while counting tokens and pricing the answer. Retrieval and
+generation run under one LangSmith trace, so a query shows up as one run.
+The default model and a user-chosen model share this one path; only the
+``llm`` passed in differs.
 """
 
 from __future__ import annotations
 
-import base64
 import time
 from collections.abc import Generator, Iterator, Sequence
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from langchain_core.documents import Document
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langsmith import traceable
 
-from config.settings import (
-    GEMINI_API_KEY,
-    GENERATION_INPUT_PRICE_PER_1M,
-    GENERATION_MAX_IMAGES,
-    GENERATION_MAX_TOKENS,
-    GENERATION_MODEL,
-    GENERATION_OUTPUT_PRICE_PER_1M,
-    GENERATION_PROVIDER,
-    GENERATION_TEMPERATURE,
-)
-from src.documents import chunk_text_and_tables, image_file, stored_image_paths
-from src.llm import LLMProviderError, create_llm
+from config.providers import get_model
+from config.settings import GENERATION_MAX_IMAGES
+from src.llm import LLMProviderError
 from src.logger import get_logger
+from src.retrieval.prompt import PromptFigure, build_messages, prompt_stats, select_figures
 from src.retrieval.search import retrieve_chunks
-from src.tables import table_to_markdown
 from src.tracing import summarize_chunks
 
 logger = get_logger(__name__)
@@ -47,64 +34,36 @@ logger = get_logger(__name__)
 StreamEvent = tuple[str, Any]
 
 
-@dataclass(frozen=True)
-class PromptFigure:
-    """One figure sent to the model, labelled ``F<n>`` in prompt order.
+def _capture_usage(chunk: Any, usage: dict[str, Any]) -> None:
+    """Add the token counts on one streamed chunk to the totals in ``usage``.
 
-    Attributes:
-        label: ``F1``, ``F2``, ... as the prompt names it.
-        chunk_number: 1-based position of its chunk in the retrieved list.
-        position: 0-based index into that chunk's stored figures.
-        record_id: The chunk's store record id, or None if it has none.
-        source: The chunk's document name.
-        path: The figure file, inside ``IMAGES_DIR``. Its bytes are read only
-            for the model request and the trace attachment.
+    LangChain gives every chunk's ``usage_metadata`` as the tokens added by
+    that chunk, so the totals are the sum over the stream. Gemini reports
+    running totals, which ``ChatGoogleGenerativeAI`` turns into these
+    differences; OpenAI-style APIs send the whole count once, on a final
+    chunk with no text, and nothing on the others.
     """
-
-    label: str
-    chunk_number: int
-    position: int
-    record_id: str | None
-    source: str
-    path: Path
-
-
-def _capture_usage(obj: Any, usage: dict[str, Any]) -> None:
-    """Merge token counts reported by the LLM into ``usage``.
-
-    ``obj`` is the AIMessage/AIMessageChunk returned by the provider.  Usage
-    may arrive on ``usage_metadata`` or nested in ``response_metadata``; for
-    streams it is typically present on every chunk (cumulative), so later
-    chunks overwrite earlier ones.
-    """
-    raw = getattr(obj, "usage_metadata", None)
-    if not raw:
-        raw = (getattr(obj, "response_metadata", None) or {}).get("usage_metadata")
-    if not raw:
-        return
+    counts = getattr(chunk, "usage_metadata", None) or {}
     for key in ("input_tokens", "output_tokens", "total_tokens"):
-        if key in raw and isinstance(raw[key], int):
-            usage[key] = raw[key]
+        if isinstance(counts.get(key), int):
+            usage[key] = usage.get(key, 0) + counts[key]
 
 
-def _estimate_cost(usage: dict[str, Any]) -> float | None:
-    """Estimate generation cost (USD) from token usage and configured pricing."""
-    if not GENERATION_INPUT_PRICE_PER_1M and not GENERATION_OUTPUT_PRICE_PER_1M:
+def _estimate_cost(provider_id: str, model_id: str, usage: dict[str, Any]) -> float | None:
+    """Estimate the answer's cost in USD from its token counts and the model's prices.
+
+    Prices come from the model's entry in ``config/providers.py``. None when
+    the model is not in the catalogue or both its prices are 0, which the
+    catalogue uses for "unknown", so an unknown price is never shown as $0.
+    """
+    model = get_model(provider_id, model_id)
+    if model is None or not (model.input_price_per_1m or model.output_price_per_1m):
         return None
-    inp = usage.get("input_tokens") or 0
-    out = usage.get("output_tokens") or 0
     cost = (
-        inp / 1_000_000 * GENERATION_INPUT_PRICE_PER_1M
-        + out / 1_000_000 * GENERATION_OUTPUT_PRICE_PER_1M
+        (usage.get("input_tokens") or 0) / 1_000_000 * model.input_price_per_1m
+        + (usage.get("output_tokens") or 0) / 1_000_000 * model.output_price_per_1m
     )
     return round(cost, 6)
-
-
-def _prompt_stats(message_content: list[dict]) -> tuple[int, int]:
-    """Return ``(text_characters, image_count)`` of a message content list."""
-    text_characters = sum(len(x["text"]) for x in message_content if x["type"] == "text")
-    images = sum(1 for x in message_content if x["type"] == "image_url")
-    return text_characters, images
 
 
 def _extract_text(content: Any) -> str:
@@ -117,108 +76,6 @@ def _extract_text(content: Any) -> str:
             for part in content
         )
     return str(content)
-
-
-_RULES = (
-    "You answer questions about electronics documents using only the context provided. "
-    "If the context does not contain the answer, say that the documents provided do not state it. "
-    "Each chunk names its document; never combine values from different documents "
-    "unless the question asks for a comparison. "
-    "Give values with their units and test conditions exactly as stated."
-)
-_FIGURE_RULE = " When you use a figure, cite its label in square brackets, like [F1]."
-
-
-def _system_prompt(with_figures: bool) -> str:
-    """The fixed rules; the figure rule only when figures are sent."""
-    return _RULES + (_FIGURE_RULE if with_figures else "")
-
-
-def _chunk_text(chunk: Document, chunk_number: int) -> str:
-    """One chunk as prompt text: its document, summary, original text and tables.
-
-    Tables are sent as Markdown (see ``src/tables.py``).
-
-    A chunk with no tables or figures was stored with its original text as
-    its summary, so the text is written once.
-    """
-    source = (chunk.metadata or {}).get("source") or "unknown document"
-    content = chunk_text_and_tables(chunk)
-    summary = (chunk.page_content or "").strip()
-    raw_text = (content["raw_text"] or "").strip()
-    lines = [f"[Chunk {chunk_number}] Document: {source}"]
-    if summary and summary != raw_text:
-        lines.append(f"Summary:\n{summary}")
-    if raw_text:
-        lines.append(f"Text:\n{raw_text}")
-    tables = [markdown for markdown in map(table_to_markdown, content["tables_html"]) if markdown]
-    for number, table in enumerate(tables, start=1):
-        lines.append(f"Table {number}:\n{table}")
-    return "\n\n".join(lines)
-
-
-def select_figures(chunks: list[Document], max_images: int) -> list[PromptFigure]:
-    """Choose the figures to send to the model, in chunk order.
-
-    Figures are numbered in prompt order. No figure file is read here. A
-    figure whose file is missing, or outside ``IMAGES_DIR``, takes no label
-    and does not count toward ``max_images``.
-
-    Args:
-        chunks: Retrieved document chunks.
-        max_images: Most figures to choose; 0 chooses every readable one.
-
-    Returns:
-        The chosen figures, labelled ``F1``, ``F2``, ...
-    """
-    figures: list[PromptFigure] = []
-    for chunk_number, chunk in enumerate(chunks, start=1):
-        metadata = chunk.metadata or {}
-        source = metadata.get("source") or "unknown document"
-        for position in range(len(stored_image_paths(metadata))):
-            path = image_file(metadata, position)
-            if path is None:
-                continue
-            figures.append(
-                PromptFigure(f"F{len(figures) + 1}", chunk_number, position, chunk.id, source, path)
-            )
-            if len(figures) == max_images:
-                return figures
-    return figures
-
-
-def _figure_blocks(figure: PromptFigure) -> list[dict]:
-    """A figure's label, then its image read from disk as base64."""
-    b64 = base64.b64encode(figure.path.read_bytes()).decode()
-    return [
-        {"type": "text", "text": f"Figure {figure.label}, from {figure.source}, chunk {figure.chunk_number}"},
-        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-    ]
-
-
-def _build_message_content(chunks: list[Document], query: str, figures: list[PromptFigure]) -> list[dict]:
-    """Build the user message: every chunk with its figures right after it, then the question.
-
-    The context comes first and the question last, which suits long
-    multimodal prompts. Every retrieved chunk is included (``top_k`` sets
-    the context size); only the figures in ``figures`` are attached.
-    """
-    content: list[dict] = [{"type": "text", "text": "CONTEXT"}]
-    for chunk_number, chunk in enumerate(chunks, start=1):
-        content.append({"type": "text", "text": _chunk_text(chunk, chunk_number)})
-        for figure in figures:
-            if figure.chunk_number == chunk_number:
-                content.extend(_figure_blocks(figure))
-    content.append({"type": "text", "text": f"QUESTION: {query}"})
-    return content
-
-
-def _build_messages(chunks: list[Document], query: str, figures: list[PromptFigure]) -> list[BaseMessage]:
-    """The system rules and the user message sent to the model."""
-    return [
-        SystemMessage(content=_system_prompt(bool(figures))),
-        HumanMessage(content=_build_message_content(chunks, query, figures)),
-    ]
 
 
 # What providers report when a reply stopped at max_tokens: OpenAI-style
@@ -235,21 +92,6 @@ def _empty_answer_message(finish_reason: str | None, usage: dict[str, Any]) -> s
             "Raise max_tokens and try again."
         )
     return f"The model returned no answer text (finish_reason: {finish_reason or 'not reported'})."
-
-
-def default_llm() -> BaseChatModel:
-    """Create the default chat model configured in ``config/settings.py``.
-
-    Its model id is ``GENERATION_MODEL``, which callers pass alongside it as
-    the ``model_id`` that labels usage.
-    """
-    return create_llm(
-        GENERATION_PROVIDER,
-        GENERATION_MODEL,
-        GEMINI_API_KEY,
-        temperature=GENERATION_TEMPERATURE,
-        max_tokens=GENERATION_MAX_TOKENS,
-    )
 
 
 def _attach_figures_to_trace(run_tree, figures: list[PromptFigure]) -> None:
@@ -308,6 +150,7 @@ def answer_query_stream(
     retriever,
     query: str,
     llm: BaseChatModel,
+    provider_id: str,
     model_id: str,
     *,
     max_images: int = GENERATION_MAX_IMAGES,
@@ -326,6 +169,7 @@ def answer_query_stream(
         retriever: Vector store retriever.
         query: The user's question.
         llm: The chat model to answer with (see ``src/llm.py``).
+        provider_id: The model's catalogue provider, used to price the answer.
         model_id: The model's catalogue id, recorded in ``usage``.
         max_images: Most images to send to the model (0 = all).
         send_images: False for a text-only model; no figures are sent.
@@ -342,7 +186,7 @@ def answer_query_stream(
             fails or writes no answer text.
     """
     if run_tree is not None:
-        run_tree.add_metadata({"model": model_id})
+        run_tree.add_metadata({"provider": provider_id, "model": model_id})
     chunks = retrieve_chunks(retriever, query)
     yield "chunks", chunks
     figures = select_figures(chunks, max_images) if send_images else []
@@ -350,7 +194,9 @@ def answer_query_stream(
     yield "figures", figures
 
     usage: dict[str, Any] = {}
-    for token in generate_answer_stream(chunks, query, llm, model_id, figures=figures, usage=usage):
+    for token in generate_answer_stream(
+        chunks, query, llm, provider_id, model_id, figures=figures, usage=usage
+    ):
         yield "token", token
     yield "usage", usage
 
@@ -365,6 +211,7 @@ def generate_answer_stream(
     chunks: list[Document],
     query: str,
     llm: BaseChatModel,
+    provider_id: str,
     model_id: str,
     *,
     figures: Sequence[PromptFigure] = (),
@@ -380,6 +227,7 @@ def generate_answer_stream(
         chunks: Retrieved document chunks.
         query: The original user query.
         llm: The chat model to answer with.
+        provider_id: The model's catalogue provider, used to price the answer.
         model_id: The model's catalogue id, recorded in ``usage``.
         figures: The figures to send, from :func:`select_figures`; none
             for a text-only model.
@@ -412,9 +260,9 @@ def generate_answer_stream(
             summary["image_count"],
         )
 
-    messages = _build_messages(chunks, query, list(figures))
+    messages = build_messages(chunks, query, list(figures))
 
-    prompt_chars, prompt_images = _prompt_stats(messages[1].content)
+    prompt_chars, prompt_images = prompt_stats(messages[1].content)
     prompt_chars += len(messages[0].content)
     usage.update(
         {
@@ -447,7 +295,7 @@ def generate_answer_stream(
         logger.warning("Model provider failed: %s", type(exc).__name__)
         raise LLMProviderError(f"The model provider failed: {exc}") from exc
     usage["latency_ms"] = round((time.perf_counter() - start) * 1000, 1)
-    usage["estimated_cost_usd"] = _estimate_cost(usage)
+    usage["estimated_cost_usd"] = _estimate_cost(provider_id, model_id, usage)
 
     if not wrote_text:
         raise LLMProviderError(_empty_answer_message(finish_reason, usage))

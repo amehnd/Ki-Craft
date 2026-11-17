@@ -1,4 +1,4 @@
-"""Tests for pure helper functions in src/retrieval/generate.py.
+"""Tests for the pure helpers in src/retrieval/generate.py and prompt.py.
 
 Cloud/model dependencies are optional; the module is skipped entirely when
 they are not installed so the suite stays lightweight.
@@ -14,39 +14,41 @@ pytest.importorskip("langchain_core")
 from langchain_core.documents import Document
 
 from src.retrieval.generate import (
-    PromptFigure,
-    _build_message_content,
-    _build_messages,
-    _figure_blocks,
     _capture_usage,
     _estimate_cost,
     _extract_text,
-    _prompt_stats,
     _trace_inputs,
+)
+from src.retrieval.prompt import (
+    PromptFigure,
+    _build_message_content,
+    _figure_blocks,
+    build_messages,
+    prompt_stats,
     select_figures,
 )
 
 
 class _FakeMsg:
-    def __init__(self, usage_metadata=None, response_metadata=None):
+    def __init__(self, usage_metadata=None):
         self.usage_metadata = usage_metadata
-        self.response_metadata = response_metadata
         self.content = ""
 
 
-def test_capture_usage_from_usage_metadata():
+def test_capture_usage_adds_each_chunk():
+    """Gemini chunks carry the tokens each chunk added; the totals are their sum."""
     usage = {}
-    _capture_usage(_FakeMsg({"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}), usage)
+    _capture_usage(_FakeMsg({"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}), usage)
+    _capture_usage(_FakeMsg({"input_tokens": 0, "output_tokens": 3, "total_tokens": 3}), usage)
     assert usage == {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 
 
-def test_capture_usage_from_response_metadata():
+def test_capture_usage_single_final_chunk():
+    """OpenAI-style streams send the whole count once, on the last chunk."""
     usage = {}
-    _capture_usage(
-        _FakeMsg(None, {"usage_metadata": {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5}}),
-        usage,
-    )
-    assert usage["input_tokens"] == 2
+    _capture_usage(_FakeMsg(), usage)
+    _capture_usage(_FakeMsg({"input_tokens": 7, "output_tokens": 4, "total_tokens": 11}), usage)
+    assert usage == {"input_tokens": 7, "output_tokens": 4, "total_tokens": 11}
 
 
 def test_capture_usage_ignores_non_int():
@@ -61,11 +63,15 @@ def test_capture_usage_no_metadata():
     assert usage == {}
 
 
-def test_estimate_cost_basic():
-    usage = {"input_tokens": 1_000_000, "output_tokens": 0}
-    # price config is imported from settings; just assert the shape is a float.
-    cost = _estimate_cost(usage)
-    assert cost is None or isinstance(cost, float)
+def test_estimate_cost_uses_the_models_own_prices():
+    """GPT-4o is priced as GPT-4o (2.50 in, 10.00 out per 1M), not as the default model."""
+    usage = {"input_tokens": 1_000_000, "output_tokens": 100_000}
+    assert _estimate_cost("openai", "gpt-4o", usage) == 3.5
+    assert _estimate_cost("gemini", "gemini-2.5-flash-lite", usage) == 0.14
+
+
+def test_estimate_cost_unknown_model_is_none():
+    assert _estimate_cost("openai", "not-a-model", {"input_tokens": 10}) is None
 
 
 def test_extract_text_string():
@@ -87,7 +93,7 @@ def test_prompt_stats_counts_text_and_images():
         {"type": "image_url", "image_url": {"url": "x"}},
         {"type": "image_url", "image_url": {"url": "y"}},
     ]
-    chars, images = _prompt_stats(content)
+    chars, images = prompt_stats(content)
     assert chars == 5
     assert images == 2
 
@@ -216,8 +222,8 @@ def test_figures_follow_their_own_chunk():
 def test_system_message_holds_the_rules():
     """Grounding and one-document rules always; the figure rule only with figures."""
     chunks = [_chunk("a", ["A1"])]
-    with_figures = _build_messages(chunks, "q", select_figures(chunks, 0))
-    without = _build_messages(chunks, "q", [])
+    with_figures = build_messages(chunks, "q", select_figures(chunks, 0))
+    without = build_messages(chunks, "q", [])
     assert [type(m).__name__ for m in with_figures] == ["SystemMessage", "HumanMessage"]
     rules = with_figures[0].content
     assert "using only the context provided" in rules
@@ -268,7 +274,7 @@ def test_unreadable_figure_takes_no_label_or_slot(_figures_root):
 
 def test_text_only_model_gets_no_images_and_no_mention_of_them():
     chunks = [_chunk("a", ["A1", "A2"]), _chunk("b", ["B1"])]
-    system, user = _build_messages(chunks, "q", [])
+    system, user = build_messages(chunks, "q", [])
     assert {part["type"] for part in user.content} == {"text"}
     assert "figure" not in (system.content + _text(user.content)).lower()
 
