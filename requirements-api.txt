@@ -13,4 +13,3 @@ langchain-ibm>=1.1
 fastapi>=0.110
 uvicorn[standard]>=0.29
 python-dotenv>=1.0
-Pillow>=10.0

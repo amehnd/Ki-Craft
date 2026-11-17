@@ -147,27 +147,17 @@ git clone https://github.com/moksh-m9u/Multimodal-Rag.git
 cd Multimodal-Rag
 ```
 
-Create and activate a virtual environment:
+Install [uv](https://docs.astral.sh/uv/), then create the virtual environment and install every dependency (API, dashboard, ingestion, tests). `pyproject.toml` lists them and `uv.lock` pins the exact versions:
 
 ```bash
-python3.13 -m venv .venv
+uv sync
 ```
 
 ```bash
 source .venv/bin/activate
 ```
 
-Install the dependencies. This is the full set (API, dashboard, ingestion, tests):
-
-```bash
-pip install -r requirements.txt
-```
-
-To run only the API, the smaller set is enough:
-
-```bash
-pip install -r requirements-api.txt
-```
+Two shorter lists exist for deployments: `requirements-api.txt` is what the Docker image installs for the API, and `app/requirements.txt` is what Streamlit Community Cloud installs for the dashboard.
 
 Create a `.env` file in the repository root with the variables from [Environment variables](#environment-variables), then check that the code imports and the tests pass:
 
@@ -453,7 +443,6 @@ config/
 src/
   embed.py               the one embedding factory (watsonx Granite)
   documents.py           turns stored chunk metadata back into text, tables, figures
-  tracing.py             LangSmith helpers
   ingestion/             offline: PDF -> elements -> chunks -> summaries -> Chroma
     extract.py             unstructured partition_pdf
     chunk.py               chunk_by_title
@@ -481,8 +470,9 @@ evals/                   evaluation questions and notes
 tests/                   pytest suite (no network)
 docs/                    trade-offs, product research, glossary
 Dockerfile               backend image
-requirements.txt         everything
+pyproject.toml, uv.lock  every dependency, with exact versions (uv sync)
 requirements-api.txt     the backend only (used by the Dockerfile)
+app/requirements.txt     the dashboard only (used by Streamlit Community Cloud)
 ```
 
 ## Project status and documentation

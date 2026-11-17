@@ -40,7 +40,7 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **Generator.** A Python function that contains `yield`. Calling it runs nothing; it returns an iterator, and each `next()` runs the body up to the next `yield` and hands back that value. Here `generate_answer_stream` yields answer tokens one at a time, so the API can forward each token as soon as the model produces it, and `answer_query_stream` yields events: the chunks first, then tokens, then usage.
 
-**LangSmith trace (run).** LangSmith records each call to a function decorated with `@traceable` as a run, with its inputs, outputs and timing; runs started inside another run nest under it, and the whole tree is one trace. Here every query is one `AnswerQuery` run with `RetrieveChunks` and `GenerateAnswerStream` under it, and LangChain's own model run (for example `ChatGoogleGenerativeAI`, with tokens and cost) under that. When the decorated function is a generator, the run stays open until the last item and `reduce_fn` turns the yielded items into its output. `src/tracing.py`, `src/retrieval/generate.py`.
+**LangSmith trace (run).** LangSmith records each call to a function decorated with `@traceable` as a run, with its inputs, outputs and timing; runs started inside another run nest under it, and the whole tree is one trace. Here every query is one `AnswerQuery` run with `RetrieveChunks` and `GenerateAnswerStream` under it, and LangChain's own model run (for example `ChatGoogleGenerativeAI`, with tokens and cost) under that. When the decorated function is a generator, the run stays open until the last item and `reduce_fn` turns the yielded items into its output. `src/retrieval/generate.py`.
 
 **Run type.** The kind LangSmith files a run under: `chain` for a step of our own, `retriever` for retrieval, `llm` for a model call. Only `llm` runs get model, token and cost columns, so only the real model call (LangChain's run) uses it here.
 
@@ -73,6 +73,10 @@ Plain-language explanations of the technical terms used in this repository. Each
 **Retry with exponential backoff.** After a failed call, wait and try again, doubling the wait each time (for example 0.5 s, 1 s, 2 s), so a busy or restarting server gets time to recover. The OpenAI client does this itself for timeouts, connection errors, 429 and 5xx.
 
 **Optional dependency (extra).** A group of packages installed only on request, declared under `[project.optional-dependencies]` in `pyproject.toml`. `uv sync --extra local` adds `mlx-vlm`; a plain `uv sync` leaves it out (and removes it if present). An environment marker (`sys_platform == 'darwin' and platform_machine == 'arm64'`) also keeps it off machines that cannot run it.
+
+**Dependency group.** Packages needed to work on the project but not to run it, declared under `[dependency-groups]` in `pyproject.toml`. The `dev` group holds `pytest` and `httpx`; `uv sync` installs it by default.
+
+**Lock file (`uv.lock`).** The exact version of every package, direct and indirect, that `uv` resolved from the ranges in `pyproject.toml`. `uv sync` installs exactly those versions, so every machine gets the same environment; `uv lock` updates the file after `pyproject.toml` changes.
 
 **Repetition penalty.** A sampling setting above 1.0 that makes a token less likely once it has appeared, which stops small models looping on the same line.
 

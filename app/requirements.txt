@@ -1,0 +1,11 @@
+# Dependencies of the Streamlit dashboards only. Streamlit Community Cloud
+# reads the dependency file next to the entrypoint (app/dashboard.py) before
+# the repository root, so the deployed UI installs this short list instead of
+# the full ingestion stack in pyproject.toml (unstructured, OpenCV), and needs
+# no system packages. app/ reaches the backend over HTTP (app/api_client.py).
+streamlit>=1.28
+pandas>=2.0
+plotly>=5.18
+pillow>=10.0
+requests>=2.31
+python-dotenv>=1.0

@@ -2884,7 +2884,7 @@ wheels = [
 [[package]]
 name = "multimodal-rag"
 version = "0.1.0"
-source = { editable = "." }
+source = { virtual = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "langchain" },
@@ -2898,7 +2898,6 @@ dependencies = [
     { name = "pandas" },
     { name = "pillow" },
     { name = "plotly" },
-    { name = "pytest" },
     { name = "python-dotenv" },
     { name = "streamlit" },
     { name = "unstructured", extra = ["all-docs"] },
@@ -2908,6 +2907,12 @@ dependencies = [
 [package.optional-dependencies]
 local = [
     { name = "mlx-vlm", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "httpx" },
+    { name = "pytest" },
 ]
 
 [package.metadata]
@@ -2925,13 +2930,18 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.0" },
     { name = "pillow", specifier = ">=10.0" },
     { name = "plotly", specifier = ">=5.18" },
-    { name = "pytest", specifier = ">=8.0" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "streamlit", specifier = ">=1.28" },
     { name = "unstructured", extras = ["all-docs"], specifier = ">=0.15" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29" },
 ]
 provides-extras = ["local"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pytest", specifier = ">=8.0" },
+]
 
 [[package]]
 name = "multiprocess"

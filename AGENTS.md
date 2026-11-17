@@ -100,7 +100,6 @@ src/retrieval/
   prompt.py               build the multimodal prompt, choose and label the figures
   generate.py             retrieve, stream the answer from the model, count tokens, price, trace
 src/documents.py        turns stored chunk metadata back into text, tables, images
-src/tracing.py          LangSmith helpers
 api/main.py             FastAPI app: CORS, lifespan, include_router calls
 api/routers/            endpoints by purpose: system, retrieval, query, images
 api/openapi_examples.py docs text and example payloads shown at /docs
@@ -128,7 +127,7 @@ Query (online):       question -> embed -> Chroma MMR (k=5 of 20) -> rebuild tex
 
 ## Commands
 
-Use the project virtual environment at `/Users/moksh/Multimodal-Rag/.venv` (Python 3.13). A stale Homebrew `uvicorn` exists on the machine, so always call the venv binaries or activate the venv first.
+Use the project virtual environment at `/Users/moksh/Multimodal-Rag/.venv` (Python 3.13). A stale Homebrew `uvicorn` exists on the machine, so always call the venv binaries or activate the venv first. `pyproject.toml` is the one dependency list and `uv.lock` pins it; `uv sync` installs both, and `uv lock` refreshes the lock after `pyproject.toml` changes. `requirements-api.txt` (the Docker image) and `app/requirements.txt` (Streamlit Community Cloud) are deliberate subsets.
 
 ```bash
 source .venv/bin/activate
@@ -243,6 +242,7 @@ Each checkpoint is a set of small commits. Finish one, let the owner test and pu
   - cost estimates hardcoded to Gemini prices. Done 2026-11-17: `_estimate_cost` uses the answering model's prices from `config/providers.py`, and `GENERATION_INPUT_PRICE_PER_1M` and `GENERATION_OUTPUT_PRICE_PER_1M` are deleted. Those settings held Gemini 2.5 Flash-Lite's prices (0.10 and 0.40 per 1M), so even the default model, 3.5 Flash-Lite (0.30 and 2.50), was priced too low. A model whose catalogue prices are both 0 reports a null cost, not $0.
 - Corpus re-summarized 2026-11-16 with the local Qwen3.5-4B backend after page cleanup (AN699, lm2596, lm317, lm555, tlv1117; ne555 was already done) and replaced in `dbv2` with `--replace`: 310 records and 276 figures, longest summary 474 words (was 1,523, past the embedder's 512-token limit).
 - Answer prompt rewritten 2026-11-16 (`src/retrieval/prompt.py:build_messages`). A system message holds the rules: answer only from the context, say when the documents do not state it, never mix values from different documents, keep units and conditions, cite figures as `[F1]`. The user message gives each chunk's document name, summary, original text (`raw_text`, previously never sent) and tables, each figure right after its chunk, and the question last. On three live questions it stopped presenting the LM555 diagram as the NE555's and gave the LM317 reference voltage range (1.2, 1.25, 1.3 V) where it had invented a 4.95 V maximum; prompts are about 40 to 70 percent longer.
+- Dead code and dependency cleanup, 2026-11-17. Deleted `src/tracing.py` (it built a 7-field summary per chunk, of which callers read two counts, for log lines only; `retrieve_chunks` now counts directly and generation logs the prompt size instead of repeating the counts), the unused re-exports in `src/retrieval/__init__.py`, `src/ingestion/__init__.py` and `config/__init__.py`, `SUPPORT_STACK` in the dashboard, the `HUGGINGFACEHUB_API_TOKEN` setting, and the catalogue fields nothing read (`context_window`, `supports_streaming`, `description`). Dependencies: `requirements.txt` is deleted (Streamlit Cloud already used `uv.lock`, which it reads first), `pyproject.toml` no longer pretends to be an installable package (`[tool.uv] package = false`, and its `packages.find` pointed at the wrong folders), `pytest` and `httpx` are a `dev` group, Pillow is out of `requirements-api.txt` (checked with Pillow blocked: the API imports, a Gemini message with a figure converts, 103 backend tests pass), and the dashboard gets `app/requirements.txt`, which Streamlit Cloud reads before the root files. That list has no unstructured and so no OpenCV, which made `packages.txt` (`libgl1`) unnecessary; it is deleted. The deployed dashboard was not redeployed to confirm.
 - Tables in prompts are Markdown since 2026-11-16 (`src/tables.py:table_to_markdown`, used by the answer and summary prompts). Unstructured has no Markdown table output, so tables stay stored as HTML (lossless, rendered by the dashboard) and are converted only when a prompt is built: 32 percent fewer tokens across the 118 stored tables. Merged cells are repeated, a rowspan stops at the end of its section, and empty tables are skipped.
 
 **Checkpoint 4. Frontend separation.**
