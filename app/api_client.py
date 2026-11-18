@@ -60,6 +60,13 @@ def _absolutize_image_urls(payload: dict[str, Any], key: str = "chunks") -> dict
     return payload
 
 
+def providers() -> list[dict]:
+    """List the providers a query's ``llm`` object accepts, each with its ``models``."""
+    response = requests.get(_url("/v1/providers"), timeout=30)
+    _raise_for_status(response)
+    return response.json()["items"]
+
+
 def documents() -> list[dict]:
     """List the indexed documents, each with ``id`` and chunk, figure and table counts."""
     response = requests.get(_url("/v1/documents"), timeout=30)

@@ -29,6 +29,7 @@ supporting evidence: the exact document chunks, their tables, and their figures.
 | `/v1/query` | POST | Get evidence **and** a full answer | `QueryResponse` |
 | `/v1/query/stream` | POST | Same body as `/v1/query`, with a streamed answer | Server-Sent Events |
 | `/v1/images/{record_id}/{position}` | GET | Fetch one figure as an image (stable URL) | raw JPEG bytes |
+| `/v1/providers` | GET | The providers and models the `llm` object accepts | `ProviderList` |
 | `/v1/documents` | GET | List the indexed documents | `DocumentList` |
 | `/v1/documents/{document_id}/chunks` | GET | One page of a document's chunks, in reading order | `ChunkPage` |
 | `/docs` | GET | Swagger UI (try-it-out docs) | HTML |
@@ -107,6 +108,32 @@ with the server's own key. Send it to answer with another catalogued model and
 | `api_key` | string | required, non-empty | Your key for that provider. Used for this request only: never stored, logged, traced or echoed back. There is no fallback to a server key |
 | `temperature` | number | 0–2, default 0 | Not sent to models that reject or ignore it (Gemini 3.5 Flash-Lite and 3.6 Flash, OpenAI o-series and GPT-5.4) |
 | `max_tokens` | integer | 1–8192, optional | Output budget, reasoning included. Left out, the catalogue default applies: 2048 for models that reason by default, 512 otherwise |
+
+`GET /v1/providers` returns this catalogue, so a model picker never offers a
+model the server would reject:
+
+```json
+{
+  "items": [
+    {
+      "id": "gemini",
+      "display_name": "Google Gemini",
+      "models": [
+        {
+          "id": "gemini-3.5-flash-lite",
+          "display_name": "Gemini 3.5 Flash-Lite",
+          "supports_vision": true,
+          "accepts_temperature": false,
+          "default_max_tokens": 512,
+          "input_price_per_1m": 0.3,
+          "output_price_per_1m": 2.5
+        }
+      ]
+    }
+  ],
+  "total": 4
+}
+```
 
 `/docs` has request examples for Gemini, Groq GPT-OSS, OpenAI GPT-4o mini and
 the Hugging Face router on both query endpoints.
@@ -375,5 +402,6 @@ can load them.
 | A typewriter/streaming answer effect | `POST /v1/query/stream` |
 | The figures of a response | `image_urls` → `GET /v1/images/...` |
 | The figures an answer cites (`[F1]`) | `figures` → match `label` |
+| The providers and models for a model picker | `GET /v1/providers` |
 | What is indexed, and every chunk of one document | `GET /v1/documents` → `GET /v1/documents/{id}/chunks` |
 | Just a health/probe check | `GET /health` |

@@ -303,6 +303,33 @@ class ChunkPage(BaseModel):
     limit: int = Field(..., description="Most chunks a page holds, as requested.")
 
 
+class ModelPayload(BaseModel):
+    """One model a request's `llm` object may name, with what it can do and costs."""
+
+    id: str = Field(..., description="Model id to send as `llm.model`.", examples=["gemini-3.5-flash-lite"])
+    display_name: str = Field(..., description="Name to show in a model picker.", examples=["Gemini 3.5 Flash-Lite"])
+    supports_vision: bool = Field(..., description="Whether it reads images; a text-only model is sent no figures.")
+    accepts_temperature: bool = Field(..., description="Whether `llm.temperature` reaches it; when false it is left out.")
+    default_max_tokens: int = Field(..., description="Output budget used when `llm.max_tokens` is left out.")
+    input_price_per_1m: float = Field(..., description="USD per million input tokens; 0 when unknown.")
+    output_price_per_1m: float = Field(..., description="USD per million output tokens; 0 when unknown.")
+
+
+class ProviderPayload(BaseModel):
+    """One model provider and the models it offers."""
+
+    id: str = Field(..., description="Provider id to send as `llm.provider`.", examples=["gemini"])
+    display_name: str = Field(..., description="Name to show in a provider picker.", examples=["Google Gemini"])
+    models: list[ModelPayload] = Field(..., description="Its models, in catalogue order.")
+
+
+class ProviderList(BaseModel):
+    """Every provider and model a request's `llm` object accepts."""
+
+    items: list[ProviderPayload] = Field(..., description="The providers, in catalogue order.")
+    total: int = Field(..., description="Number of providers.")
+
+
 class QueryResponse(RetrieveResponse):
     """The retrieved chunks, the generated answer and the figures it drew on."""
 

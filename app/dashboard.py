@@ -3,7 +3,8 @@
 import sys
 import os
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Only app/ is on the path, for api_client: the dashboard reaches the backend
+# over HTTP and cannot import config/, src/ or api/.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import json
@@ -36,12 +37,11 @@ _merge_streamlit_secrets()
 import pandas as pd
 import plotly.express as px
 
-from config.providers import ALL_PROVIDERS, list_models_for_provider
-
 from api_client import API_BASE_URL
 from api_client import document_chunks as api_document_chunks
 from api_client import documents as api_documents
 from api_client import health as api_health
+from api_client import providers as api_providers
 from api_client import stream as api_stream
 from api_client import query as api_query
 
@@ -685,6 +685,12 @@ def list_documents() -> list[str]:
     return [document["id"] for document in api_documents()]
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def list_providers() -> list[dict]:
+    """The providers and models the API accepts. A failure raises and is not cached."""
+    return api_providers()
+
+
 def document_ids_or_error() -> tuple[list[str], str | None]:
     """The indexed document ids, or an empty list and why the API could not list them."""
     try:
@@ -867,8 +873,15 @@ def render_sidebar() -> None:
         st.divider()
         st.subheader("LLM Provider")
 
-        provider_ids = [p.id for p in ALL_PROVIDERS]
-        provider_names = {p.id: p.display_name for p in ALL_PROVIDERS}
+        try:
+            catalogue = list_providers()
+        except Exception as exc:
+            logger.warning("Could not list providers from %s: %s", API_BASE_URL, exc)
+            st.caption(f"Providers unavailable: `GET {API_BASE_URL}/v1/providers` failed ({exc}).")
+            catalogue = []
+        provider_ids = [p["id"] for p in catalogue]
+        provider_names = {p["id"]: p["display_name"] for p in catalogue}
+        models_by_provider = {p["id"]: p["models"] for p in catalogue}
 
         selected_provider = st.selectbox(
             "Provider",
@@ -879,9 +892,9 @@ def render_sidebar() -> None:
         )
 
         if selected_provider:
-            models = list_models_for_provider(selected_provider)
-            model_ids = [m.id for m in models]
-            model_names = {m.id: m.display_name for m in models}
+            models = models_by_provider[selected_provider]
+            model_ids = [m["id"] for m in models]
+            model_names = {m["id"]: m["display_name"] for m in models}
 
             st.selectbox(
                 "Model",

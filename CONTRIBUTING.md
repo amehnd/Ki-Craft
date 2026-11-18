@@ -143,6 +143,7 @@ Interactive documentation is at http://127.0.0.1:8001/docs.
 | POST | `/v1/query` | Retrieves, then answers with the default model, or with the provider, model and key in an optional `llm` object |
 | POST | `/v1/query/stream` | The same, streamed token by token over Server-Sent Events |
 | GET | `/v1/images/{record_id}/{position}` | Serves one figure of a stored chunk, at a stable URL |
+| GET | `/v1/providers` | Lists the providers and models the `llm` object accepts |
 | GET | `/v1/documents` | Lists the indexed documents with their chunk, figure and table counts |
 | GET | `/v1/documents/{document_id}/chunks` | One page of a document's chunks, in reading order (`offset`, `limit`) |
 
@@ -356,7 +357,7 @@ Every tunable lives in `config/settings.py`.
 | `CHUNK_MAX_CHARACTERS` | `3000` | Largest chunk |
 | `ENHANCEMENT_MODEL` | `zai-org/GLM-4.5V` | Vision model that writes the chunk summaries |
 
-The providers and models the `llm` object accepts are listed in `config/providers.py`.
+The providers and models the `llm` object accepts are listed in `config/providers.py`, and served by `GET /v1/providers`.
 
 ## Project structure
 
@@ -383,7 +384,7 @@ src/
     generate.py            retrieves, streams the answer, counts tokens, prices, traces
 api/
   main.py                FastAPI app: CORS, lifespan, routers
-  routers/               endpoints by purpose: system, retrieval, query, documents, images
+  routers/               endpoints by purpose: system, retrieval, query, providers, documents, images
   service.py             owns the store and retriever, picks the default LLM
   schemas.py             request and response models
   openapi_examples.py    docs text and example payloads shown at /docs
