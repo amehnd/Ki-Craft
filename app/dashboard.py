@@ -7,11 +7,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import json
-import base64
 import io
-import time
+import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 import streamlit as st
 
@@ -35,18 +34,25 @@ def _merge_streamlit_secrets() -> None:
 _merge_streamlit_secrets()
 
 import pandas as pd
-from PIL import Image
 import plotly.express as px
 
-from config.settings import API_BASE_URL
 from config.providers import ALL_PROVIDERS, list_models_for_provider
-from src.logger import get_logger
 
+from api_client import API_BASE_URL
+from api_client import document_chunks as api_document_chunks
+from api_client import documents as api_documents
 from api_client import health as api_health
 from api_client import stream as api_stream
 from api_client import query as api_query
 
-logger = get_logger(__name__)
+# The dashboard logs to the console only: Streamlit Community Cloud keeps no
+# files between restarts. The format matches the backend's src/logger.py.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 PAGE_TITLE = "Multimodal RAG Chunk Inspector"
 LAYOUT = "wide"
@@ -166,13 +172,13 @@ EVAL_METRICS: list[tuple[str, str, str]] = [
 ]
 
 DATASET_LABELS: dict[str, str] = {
-    "lm555.json": "LM555 Timer",
+    "lm555": "LM555 Timer",
 }
 
 
-def _dataset_display_name(filename: str) -> str:
-    """Human-friendly label for a chunk export file: its document name, upper case."""
-    return DATASET_LABELS.get(filename) or Path(filename).stem.upper()
+def _dataset_display_name(document_id: str) -> str:
+    """Human-friendly label for a document: its name, upper case."""
+    return DATASET_LABELS.get(document_id) or document_id.upper()
 
 
 def _asset(name: str) -> str:
@@ -645,7 +651,7 @@ def log_tracing_status() -> None:
 def init_state() -> None:
     defaults = {
         "data": None,
-        "file_name": None,
+        "document_id": None,
         "filtered_indices": None,
         "selected_chunk_id": None,
         "search_query": "",
@@ -668,37 +674,50 @@ def init_state() -> None:
             st.session_state[k] = v
 
 
-@st.cache_data
-def load_json(file: Any) -> list[dict]:
-    return json.load(file)
+@st.cache_data(ttl=60, show_spinner=False)
+def list_documents() -> list[str]:
+    """Ids of the indexed documents, from the API.
+
+    Cached for a minute: Streamlit reruns the script on every click, and the
+    list changes only when a document is ingested. A failure raises, and
+    Streamlit never caches an exception, so the next run asks the API again.
+    """
+    return [document["id"] for document in api_documents()]
 
 
-def load_json_from_path(path: str) -> list[dict]:
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+def document_ids_or_error() -> tuple[list[str], str | None]:
+    """The indexed document ids, or an empty list and why the API could not list them."""
+    try:
+        return list_documents(), None
+    except Exception as exc:
+        logger.warning("Could not list documents from %s: %s", API_BASE_URL, exc)
+        return [], f"`GET {API_BASE_URL}/v1/documents` failed: {exc}"
 
 
-def list_json_files() -> list[str]:
-    json_dir = Path(__file__).resolve().parent.parent / "json"
-    if not json_dir.exists():
-        return []
-    return sorted(f.name for f in json_dir.glob("*.json"))
+@st.cache_data(ttl=60, show_spinner="Loading chunks from the API ...")
+def fetch_document_chunks(document_id: str) -> list[dict]:
+    """Every chunk of one document, from the API, in reading order."""
+    return api_document_chunks(document_id)
 
 
-def _oc(meta: dict) -> dict:
-    return meta.get("original_content") or {}
-
-
-def get_images_base64(chunk: dict) -> list[str]:
-    return _oc(chunk.get("metadata", {})).get("images_base64") or []
+def get_image_urls(chunk: dict) -> list[str]:
+    """Absolute URLs of the chunk's figures, served by the API."""
+    return chunk.get("image_urls") or []
 
 
 def get_tables_html(chunk: dict) -> list[str]:
-    return _oc(chunk.get("metadata", {})).get("tables_html") or []
+    """The chunk's tables as HTML strings."""
+    return chunk.get("tables_html") or []
 
 
 def get_raw_text(chunk: dict) -> str:
-    return _oc(chunk.get("metadata", {})).get("raw_text") or ""
+    """The chunk's text as extracted from the PDF."""
+    return chunk.get("raw_text") or ""
+
+
+def chunk_fields(chunk: dict) -> dict:
+    """The chunk's identifying fields, without its long text, tables and figures."""
+    return {k: v for k, v in chunk.items() if k not in {"enhanced_content", "raw_text", "tables_html"}}
 
 
 def get_enhanced_content(chunk: dict) -> str:
@@ -715,7 +734,7 @@ def health_score(chunk: dict) -> tuple[int, str]:
         score += 25
     if get_raw_text(chunk):
         score += 25
-    if get_images_base64(chunk):
+    if get_image_urls(chunk):
         score += 25
     if get_tables_html(chunk):
         score += 25
@@ -727,14 +746,6 @@ def health_score(chunk: dict) -> tuple[int, str]:
     else:
         label = "Fail"
     return score, label
-
-
-def render_image_from_base64(b64_str: str) -> Optional[Image.Image]:
-    try:
-        raw = base64.b64decode(b64_str)
-        return Image.open(io.BytesIO(raw))
-    except Exception:
-        return None
 
 
 def parse_table_html(html: str) -> Optional[pd.DataFrame]:
@@ -762,7 +773,7 @@ def apply_filters(data: list[dict]) -> list[dict]:
         result = filtered
 
     if st.session_state.has_images:
-        result = [c for c in result if get_images_base64(c)]
+        result = [c for c in result if get_image_urls(c)]
     if st.session_state.has_tables:
         result = [c for c in result if get_tables_html(c)]
     if st.session_state.has_raw_text:
@@ -796,31 +807,19 @@ def render_sidebar() -> None:
     with st.sidebar:
         st.header("Data")
 
-        json_files = list_json_files()
-        if json_files:
-            selected_file = st.selectbox(
+        document_ids, _ = document_ids_or_error()
+        if document_ids:
+            selected = st.selectbox(
                 "Select a datasheet",
-                options=[""] + json_files,
-                format_func=lambda x: "Choose a file..." if x == "" else x,
-                key="json_selectbox",
+                options=[""] + document_ids,
+                format_func=lambda x: "Choose a document..." if x == "" else _dataset_display_name(x),
+                key="document_selectbox",
             )
-            if selected_file:
-                if selected_file != st.session_state.get("file_name"):
-                    load_dataset(selected_file, sync_sidebar=False)
-                    st.rerun()
-
-        st.divider()
-        st.caption("Or upload your own JSON")
-        uploaded = st.file_uploader(
-            "Upload JSON", type=["json"], label_visibility="collapsed"
-        )
-
-        if uploaded and uploaded.name != st.session_state.get("file_name"):
-            st.session_state.data = load_json(uploaded)
-            st.session_state.file_name = uploaded.name
-            st.session_state.filtered_indices = None
-            st.session_state.selected_chunk_id = None
-            st.rerun()
+            if selected and selected != st.session_state.get("document_id"):
+                load_dataset(selected, sync_sidebar=False)
+                st.rerun()
+        else:
+            st.caption("No documents: the API is unreachable or holds none.")
 
         data = st.session_state.data
         if data is not None:
@@ -950,9 +949,9 @@ def render_sidebar() -> None:
 
 def render_dashboard(data: list[dict]) -> None:
     total = len(data)
-    total_images = sum(len(get_images_base64(c)) for c in data)
+    total_images = sum(len(get_image_urls(c)) for c in data)
     total_tables = sum(len(get_tables_html(c)) for c in data)
-    chunks_with_images = sum(1 for c in data if get_images_base64(c))
+    chunks_with_images = sum(1 for c in data if get_image_urls(c))
     chunks_with_tables = sum(1 for c in data if get_tables_html(c))
     avg_raw = (
         sum(len(get_raw_text(c)) for c in data) / total if total else 0
@@ -979,7 +978,7 @@ def build_chunk_df(data: list[dict]) -> pd.DataFrame:
     rows = []
     for c in data:
         cid = c.get("chunk_id", "?")
-        n_img = len(get_images_base64(c))
+        n_img = len(get_image_urls(c))
         n_tbl = len(get_tables_html(c))
         rlen = len(get_raw_text(c))
         elen = len(get_enhanced_content(c))
@@ -1041,7 +1040,7 @@ def _status_badge(present: bool, label: str) -> str:
 
 def render_detail(chunk: dict) -> None:
     cid = chunk.get("chunk_id", "?")
-    images = get_images_base64(chunk)
+    images = get_image_urls(chunk)
     tables = get_tables_html(chunk)
     raw = get_raw_text(chunk)
     enhanced = get_enhanced_content(chunk)
@@ -1137,41 +1136,16 @@ def _render_raw_tab(text: str) -> None:
     )
 
 
-def _render_images_tab(images: list[str]) -> None:
-    if not images:
+def _render_images_tab(image_urls: list[str]) -> None:
+    """Show each figure; the browser loads it from the API's image URL."""
+    if not image_urls:
         st.info("No images found in this chunk.")
         return
 
-    for i, b64 in enumerate(images, 1):
+    for i, url in enumerate(image_urls, 1):
         st.subheader(f"Image {i}")
-        img = render_image_from_base64(b64)
-        if img is None:
-            st.warning(f"Image {i} could not be decoded (malformed base64).")
-            continue
-
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        bts = buf.getvalue()
-
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.image(img, width="stretch")
-        with col2:
-            st.write(f"**Width:** {img.width} px")
-            st.write(f"**Height:** {img.height} px")
-            st.write(f"**Size:** {len(bts) / 1024:.1f} KB")
-            st.write(f"**Format:** {img.format or 'N/A'}")
-
-            st.download_button(
-                "Download",
-                data=bts,
-                file_name=f"chunk_image_{i}.png",
-                mime="image/png",
-                key=f"dl_img_{i}",
-            )
-
-        with st.expander(f"Zoom Image {i}"):
-            st.image(img, width=800)
+        st.image(url, width="stretch")
+        st.markdown(f"[Open full size]({url})")
 
 
 def _render_tables_tab(tables: list[str]) -> None:
@@ -1195,17 +1169,13 @@ def _render_tables_tab(tables: list[str]) -> None:
 
 
 def _render_metadata_tab(chunk: dict) -> None:
-    meta = chunk.get("metadata", {})
-    images = get_images_base64(chunk)
-    tables = get_tables_html(chunk)
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Image Count", len(images))
-    col2.metric("Table Count", len(tables))
-    col3.write(f"**Metadata keys:** {list(meta.keys())}")
+    """Counts and the chunk's identifying fields."""
+    col1, col2 = st.columns(2)
+    col1.metric("Image Count", len(get_image_urls(chunk)))
+    col2.metric("Table Count", len(get_tables_html(chunk)))
 
     st.divider()
-    st.json(meta)
+    st.json(chunk_fields(chunk))
 
 
 def render_compare(data: list[dict]) -> None:
@@ -1236,7 +1206,7 @@ def render_compare(data: list[dict]) -> None:
 
 
 def _render_mini_chunk(chunk: dict) -> None:
-    images = get_images_base64(chunk)
+    images = get_image_urls(chunk)
     tables = get_tables_html(chunk)
     raw = get_raw_text(chunk)
     enhanced = get_enhanced_content(chunk)
@@ -1255,10 +1225,8 @@ def _render_mini_chunk(chunk: dict) -> None:
     with st.expander("Raw Text"):
         st.text(raw or "*empty*")
     with st.expander(f"Images ({len(images)})"):
-        for i, b64 in enumerate(images, 1):
-            img = render_image_from_base64(b64)
-            if img:
-                st.image(img, width=300, caption=f"Image {i}")
+        for i, url in enumerate(images, 1):
+            st.image(url, width=300, caption=f"Image {i}")
     with st.expander(f"Tables ({len(tables)})"):
         for i, html in enumerate(tables, 1):
             df = parse_table_html(html)
@@ -1267,7 +1235,7 @@ def _render_mini_chunk(chunk: dict) -> None:
             else:
                 st.html(html)
     with st.expander("Metadata"):
-        st.json(chunk.get("metadata", {}))
+        st.json(chunk_fields(chunk))
 
 
 def render_analytics(data: list[dict]) -> None:
@@ -1277,7 +1245,7 @@ def render_analytics(data: list[dict]) -> None:
         [
             {
                 "chunk_id": c.get("chunk_id"),
-                "images": len(get_images_base64(c)),
+                "images": len(get_image_urls(c)),
                 "tables": len(get_tables_html(c)),
                 "raw_len": len(get_raw_text(c)),
                 "enhanced_len": len(get_enhanced_content(c)),
@@ -1764,15 +1732,14 @@ def _render_architecture() -> None:
 def _render_how_to_explore() -> None:
     st.markdown("## How to explore this project")
     st.markdown(
-        "Pick a datasheet in the **sidebar** (or upload your own chunk-export JSON) "
-        "and every page below becomes live."
+        "Pick a datasheet in the **sidebar** and every page below becomes live."
     )
 
     steps = [
         (
             "Select a datasheet",
-            "Sidebar &rarr; *Select a datasheet*. Five datasets ship with the repo: "
-            + ", ".join(f"**{_dataset_display_name(f)}**" for f in list_json_files())
+            "Sidebar &rarr; *Select a datasheet*. The API currently holds: "
+            + ", ".join(f"**{_dataset_display_name(d)}**" for d in document_ids_or_error()[0])
             + ". The sidebar then reports total chunks and unlocks the filters.",
         ),
         (
@@ -1851,17 +1818,24 @@ PAGE_PURPOSE: dict[str, str] = {
 }
 
 
-def load_dataset(filename: str, sync_sidebar: bool = True) -> None:
-    """Load a chunk-export JSON from the bundled ``json/`` directory."""
-    path = Path(__file__).resolve().parent.parent / "json" / filename
-    st.session_state.data = load_json_from_path(str(path))
-    st.session_state.file_name = filename
+def load_dataset(document_id: str, sync_sidebar: bool = True) -> None:
+    """Load one document's chunks from the API into the session.
+
+    A failed request is shown as an error and leaves the session unchanged.
+    """
+    try:
+        chunks = fetch_document_chunks(document_id)
+    except Exception as exc:
+        st.error(f"Could not load {document_id} from the API: {exc}")
+        return
+    st.session_state.data = chunks
+    st.session_state.document_id = document_id
     st.session_state.filtered_indices = None
     st.session_state.selected_chunk_id = None
     if sync_sidebar:
         # Applied on the next run, before the sidebar selectbox is created, so
         # the sidebar stays in sync with what was loaded from a page button.
-        st.session_state.pending_file = filename
+        st.session_state.pending_document = document_id
 
 
 def render_no_dataset(page: str) -> None:
@@ -1869,25 +1843,25 @@ def render_no_dataset(page: str) -> None:
     st.header(page)
     st.markdown(PAGE_PURPOSE.get(page, ""))
 
-    files = list_json_files()
-    if files:
+    document_ids, error = document_ids_or_error()
+    if document_ids:
         st.markdown("#### Select a datasheet")
-        cols = st.columns(len(files))
-        for col, filename in zip(cols, files):
+        cols = st.columns(len(document_ids))
+        for col, document_id in zip(cols, document_ids):
             if col.button(
-                _dataset_display_name(filename),
+                _dataset_display_name(document_id),
                 width="stretch",
-                key=f"load_{filename}",
+                key=f"load_{document_id}",
             ):
-                load_dataset(filename)
+                load_dataset(document_id)
                 st.rerun()
     else:
-        st.info("No bundled datasheets were found in the `json/` directory.")
+        st.error(
+            f"{error or 'The API holds no documents.'} A 404 here usually means the server at "
+            f"`{API_BASE_URL}` runs older code than this dashboard; set API_BASE_URL to the right one."
+        )
 
-    st.caption(
-        "You can also pick a datasheet, or upload your own chunk-export JSON, "
-        "from the sidebar."
-    )
+    st.caption("You can also pick a datasheet from the sidebar.")
 
 
 def render_landing_page() -> None:
@@ -2021,18 +1995,18 @@ def main() -> None:
     )
 
     # A dataset loaded from a page button is reflected in the sidebar picker.
-    pending = st.session_state.pop("pending_file", None)
+    pending = st.session_state.pop("pending_document", None)
     if pending:
-        st.session_state["json_selectbox"] = pending
+        st.session_state["document_selectbox"] = pending
 
     render_sidebar()
 
     data = st.session_state.data
 
     st.sidebar.divider()
-    if st.session_state.file_name:
+    if st.session_state.document_id:
         st.sidebar.caption(
-            f"Loaded: {st.session_state.file_name}  "
+            f"Loaded: {st.session_state.document_id}  "
             f"-  Chunks: {len(data)}"
         )
 

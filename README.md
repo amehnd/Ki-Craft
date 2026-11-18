@@ -97,7 +97,7 @@ flowchart TB
     CHROMA --> MMR
     IMAGES --> REBUILD
     CHAT -- "HTTP" --> Q
-    JSON --> EXPLORE
+    EXPLORE -- "HTTP, /v1/documents" --> CHROMA
 ```
 
 </details>

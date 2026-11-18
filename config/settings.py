@@ -175,11 +175,6 @@ LOCAL_ENHANCEMENT_REPETITION_PENALTY: float = float(os.getenv("LOCAL_ENHANCEMENT
 LOCAL_ENHANCEMENT_THINKING: bool = os.getenv("LOCAL_ENHANCEMENT_THINKING", "false").lower() == "true"
 
 # API server
-# Base URL of the FastAPI backend.  The Streamlit dashboard talks to this
-# instead of loading the vector store itself.  Override in .env / secrets
-# when the backend runs elsewhere (e.g. a deployed URL).
-API_BASE_URL: str = os.getenv("API_BASE_URL", "http://localhost:8000")
-
 # Browser origins allowed to call the API (CORS).  Comma-separated so you can
 # add the production frontend URL later, e.g.
 #   CORS_ALLOWED_ORIGINS=https://app.example.com,http://localhost:5173

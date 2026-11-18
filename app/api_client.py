@@ -4,16 +4,26 @@ Lets the Streamlit dashboard talk to the API instead of loading the vector
 store and calling the LLM itself.  Image URLs returned by the backend are
 relative (``/v1/images/{record_id}/{position}``); this client rewrites them to
 absolute URLs so ``st.image`` can load them directly.
+
+The backend's address is the client's one setting, read here from the
+environment rather than from ``config/settings.py``: the UI shares no code
+with the backend, only the HTTP API.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Iterator
 
 import requests
+from dotenv import load_dotenv
 
-from config.settings import API_BASE_URL
+# Fills os.environ from the repository's .env without overwriting variables
+# that are already set (a shell export, or Streamlit secrets copied earlier).
+load_dotenv()
+
+API_BASE_URL: str = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 _REQUEST_TIMEOUT = 300
 
@@ -39,11 +49,50 @@ def _raise_for_status(response: requests.Response) -> None:
     raise requests.HTTPError(f"{response.status_code}: {detail}", response=response)
 
 
-def _absolutize_image_urls(payload: dict[str, Any]) -> dict[str, Any]:
-    """Turn relative ``/v1/images/...`` URLs into absolute backend URLs."""
-    for chunk in payload.get("chunks", []):
+def _absolutize_image_urls(payload: dict[str, Any], key: str = "chunks") -> dict[str, Any]:
+    """Turn relative ``/v1/images/...`` URLs into absolute backend URLs.
+
+    ``key`` names the list of chunks: ``chunks`` in query and retrieve
+    responses, ``items`` in a page of a document's chunks.
+    """
+    for chunk in payload.get(key, []):
         chunk["image_urls"] = [_url(u) for u in chunk.get("image_urls", [])]
     return payload
+
+
+def documents() -> list[dict]:
+    """List the indexed documents, each with ``id`` and chunk, figure and table counts."""
+    response = requests.get(_url("/v1/documents"), timeout=30)
+    _raise_for_status(response)
+    return response.json()["items"]
+
+
+# The API's largest page; fewer requests for the same chunks.
+_PAGE_SIZE = 200
+
+
+def document_chunks(document_id: str) -> list[dict]:
+    """Return every chunk of one document, in reading order.
+
+    Reads ``GET /v1/documents/{document_id}/chunks`` page by page until
+    ``total`` chunks have arrived, so a document larger than one page is
+    still read whole.
+
+    Raises:
+        requests.HTTPError: 404 for an unknown document, or any other failure.
+    """
+    chunks: list[dict] = []
+    while True:
+        response = requests.get(
+            _url(f"/v1/documents/{document_id}/chunks"),
+            params={"offset": len(chunks), "limit": _PAGE_SIZE},
+            timeout=_REQUEST_TIMEOUT,
+        )
+        _raise_for_status(response)
+        page = _absolutize_image_urls(response.json(), key="items")
+        chunks.extend(page["items"])
+        if not page["items"] or len(chunks) >= page["total"]:
+            return chunks
 
 
 def health() -> dict:
