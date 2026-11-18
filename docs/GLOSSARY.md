@@ -90,6 +90,10 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **Path parameter.** A `{name}` part of a route's path, such as `{position}` in `/v1/images/{record_id}/{position}`. FastAPI passes it to the function parameter with the same name and converts it with that parameter's type hint, returning 422 when the conversion fails.
 
+**Query parameter.** A `name=value` pair after the `?` in a URL, such as `?offset=50&limit=50`. FastAPI passes it to the function parameter with the same name, converts it with its type hint, and checks its limits (`Query(ge=1, le=200)`), returning 422 when either fails.
+
+**Pagination (offset and limit).** Returning a long list in pages. The client sends `offset` (how many items to skip) and `limit` (how many to return), and the response says `total`, so the client knows when it has everything. A page past the end is simply empty. The alternative, cursor pagination, hands back an opaque "continue from here" token instead; it suits huge or fast-changing lists, where an offset can skip or repeat items when rows are inserted. Here a document's chunks are few and change only on re-ingestion, so offset and limit are enough. `GET /v1/documents/{document_id}/chunks`.
+
 **Record id.** The id Chroma gives each stored chunk when it is added, a random UUID such as `004ca22b-a528-444e-9c0e-27c8b5858ff5`. It never changes while the record exists, so figure URLs contain it (`/v1/images/{record_id}/{position}`), and it will become the chunk's primary key in Postgres. Not the same as `chunk_id`, which is only the chunk's position in one response.
 
 **Path traversal.** An attack where a request smuggles `..` or an absolute path into something the server turns into a file path, to read files outside the intended folder. The image route avoids it twice: the URL names a record, not a file, and the stored path must still resolve inside `IMAGES_DIR` (`src/documents.py:image_file`).

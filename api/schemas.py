@@ -261,6 +261,48 @@ class FigurePayload(BaseModel):
     source: str = Field(..., description="Name of the source document.", examples=["lm317"])
 
 
+class DocumentSummaryPayload(BaseModel):
+    """One indexed document and how much it holds."""
+
+    id: str = Field(..., description="The document's name, its PDF file name without `.pdf`.", examples=["lm317"])
+    chunk_count: int = Field(..., description="Stored chunks.", examples=[51])
+    image_count: int = Field(..., description="Figures across its chunks.", examples=[40])
+    table_count: int = Field(..., description="Tables across its chunks.", examples=[22])
+
+
+class DocumentList(BaseModel):
+    """Every indexed document."""
+
+    items: list[DocumentSummaryPayload] = Field(..., description="The documents, sorted by `id`.")
+    total: int = Field(..., description="Number of documents.")
+
+
+class StoredChunk(BaseModel):
+    """One stored chunk of a document, as the chunk explorer shows it."""
+
+    record_id: str = Field(..., description="Stable ID of the chunk in the store; part of its figure URLs.")
+    chunk_id: int = Field(..., description="Position of the chunk in its document, counting from 1.")
+    source: str = Field(..., description="The document's name.")
+    enhanced_content: str = Field(..., description="Summary written at ingestion; the text that is searched.")
+    raw_text: str = Field("", description="Text extracted from the PDF.")
+    tables_html: list[str] = Field(default_factory=list, description="Each table as an HTML `<table>` string.")
+    image_urls: list[str] = Field(
+        default_factory=list,
+        description="Relative URL of each figure, `/v1/images/{record_id}/{position}`.",
+    )
+    has_table: bool = Field(False, description="Whether the chunk has tables.")
+    has_image: bool = Field(False, description="Whether the chunk has figures.")
+
+
+class ChunkPage(BaseModel):
+    """One page of a document's chunks, in reading order."""
+
+    items: list[StoredChunk] = Field(..., description="The chunks on this page.")
+    total: int = Field(..., description="Chunks in the whole document.")
+    offset: int = Field(..., description="Chunks skipped before this page.")
+    limit: int = Field(..., description="Most chunks a page holds, as requested.")
+
+
 class QueryResponse(RetrieveResponse):
     """The retrieved chunks, the generated answer and the figures it drew on."""
 

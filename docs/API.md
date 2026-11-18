@@ -29,6 +29,8 @@ supporting evidence: the exact document chunks, their tables, and their figures.
 | `/v1/query` | POST | Get evidence **and** a full answer | `QueryResponse` |
 | `/v1/query/stream` | POST | Same body as `/v1/query`, with a streamed answer | Server-Sent Events |
 | `/v1/images/{record_id}/{position}` | GET | Fetch one figure as an image (stable URL) | raw JPEG bytes |
+| `/v1/documents` | GET | List the indexed documents | `DocumentList` |
+| `/v1/documents/{document_id}/chunks` | GET | One page of a document's chunks, in reading order | `ChunkPage` |
 | `/docs` | GET | Swagger UI (try-it-out docs) | HTML |
 
 There are only **three shapes** you need to understand:
@@ -192,6 +194,67 @@ once.
 
 ---
 
+### Browsing the stored documents
+
+Two read-only endpoints show what is indexed, with no search and no model call.
+
+`GET /v1/documents` lists every document:
+
+```json
+{
+  "items": [
+    {"id": "lm317", "chunk_count": 51, "image_count": 49, "table_count": 20}
+  ],
+  "total": 6
+}
+```
+
+`GET /v1/documents/{document_id}/chunks?offset=0&limit=50` returns a document's
+chunks in reading order, one page at a time:
+
+```json
+{
+  "items": [
+    {
+      "record_id": "004ca22b-a528-444e-9c0e-27c8b5858ff5",
+      "chunk_id": 1,
+      "source": "lm317",
+      "enhanced_content": "The LM317 is an adjustable ...",
+      "raw_text": "LM317 3-Terminal Adjustable Regulator ...",
+      "tables_html": [],
+      "image_urls": ["/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0"],
+      "has_table": false,
+      "has_image": true
+    }
+  ],
+  "total": 51,
+  "offset": 0,
+  "limit": 50
+}
+```
+
+| Parameter | Rules | Meaning |
+|---|---|---|
+| `document_id` | path | A document's `id`, as `/v1/documents` lists it; an unknown one is a **404** |
+| `offset` | integer, 0 or more, default 0 | Chunks to skip from the start of the document. Past the end gives an empty `items`, not an error |
+| `limit` | integer, 1 to 200, default 50 | Most chunks to return; anything else is a **422** |
+
+Here `chunk_id` is the chunk's position in its document, counting from 1. In
+query responses `chunk_id` is the chunk's position in that response instead.
+To read a whole document, request pages until you have `total` chunks:
+
+```js
+let chunks = [];
+do {
+  const r = await fetch(`${base}/v1/documents/lm317/chunks?offset=${chunks.length}&limit=200`);
+  const page = await r.json();
+  chunks = chunks.concat(page.items);
+  if (page.items.length === 0) break;
+} while (chunks.length < page.total);
+```
+
+---
+
 ## 4. Streaming the answer (`/v1/query/stream`)
 
 `POST /v1/query/stream` takes the same JSON body as `POST /v1/query`. The
@@ -312,4 +375,5 @@ can load them.
 | A typewriter/streaming answer effect | `POST /v1/query/stream` |
 | The figures of a response | `image_urls` → `GET /v1/images/...` |
 | The figures an answer cites (`[F1]`) | `figures` → match `label` |
+| What is indexed, and every chunk of one document | `GET /v1/documents` → `GET /v1/documents/{id}/chunks` |
 | Just a health/probe check | `GET /health` |

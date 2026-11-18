@@ -41,6 +41,8 @@ LM317_ID = "11111111-1111-4111-8111-111111111111"
 TLV1117_ID = "22222222-2222-4222-8222-222222222222"
 # A record whose stored path climbs out of the images folder.
 ESCAPING_ID = "33333333-3333-4333-8333-333333333333"
+# The first LM317 chunk, stored after the second one, to check browsing sorts.
+LM317_FIRST_ID = "44444444-4444-4444-8444-444444444444"
 
 
 def _fake_chunks() -> list[Document]:
@@ -50,6 +52,7 @@ def _fake_chunks() -> list[Document]:
         page_content="LM317 summary: adjustable regulator with ADJ, VOUT, VIN pins.",
         metadata={
             "source": "lm317",
+            "chunk_id": 2,
             "raw_text": "Pin 1 ADJ, pin 2 VOUT, pin 3 VIN.",
             "tables_html": json.dumps(["<table><tr><td>ADJ</td></tr></table>"]),
             "image_paths": "[]",
@@ -60,12 +63,23 @@ def _fake_chunks() -> list[Document]:
         page_content="TLV1117 summary: fixed 3.3 V LDO.",
         metadata={
             "source": "tlv1117",
+            "chunk_id": 1,
             "raw_text": "Dropout 1.1 V at 800 mA.",
             "tables_html": "[]",
             "image_paths": json.dumps(["dbv2/images/tlv1117_c1_img0.jpg"]),
         },
     )
     return [lm317, tlv1117]
+
+
+def _stored_chunks() -> list[Document]:
+    """Every record in the fake store: the retrievable chunks plus LM317's first chunk."""
+    lm317_first = Document(
+        id=LM317_FIRST_ID,
+        page_content="LM317 overview: 1.2 V to 37 V adjustable regulator.",
+        metadata={"source": "lm317", "chunk_id": 1, "raw_text": "", "tables_html": "[]", "image_paths": "[]"},
+    )
+    return _fake_chunks() + [lm317_first]
 
 
 class _FakeRetriever:
@@ -86,12 +100,20 @@ class _FakeStore:
         """Mimic ``Chroma.as_retriever``."""
         return _FakeRetriever((search_kwargs or {}).get("k", 10))
 
-    def get(self, ids: list[str], include: list[str]) -> dict:
-        """Mimic ``Chroma.get``: the metadata of the records that exist."""
-        records = {doc.id: doc.metadata for doc in _fake_chunks()}
-        records[ESCAPING_ID] = {"image_paths": json.dumps(["dbv2/images/../../secret.txt"])}
-        found = [i for i in ids if i in records]
-        return {"ids": found, "metadatas": [records[i] for i in found]}
+    def get(self, ids: list[str] | None = None, where: dict | None = None, include: list[str] = ()) -> dict:
+        """Mimic ``Chroma.get``: records by id, or by an exact ``source`` match, or all.
+
+        Like Chroma, records come back in storage order, not sorted.
+        """
+        records = {doc.id: doc for doc in _stored_chunks()}
+        records[ESCAPING_ID] = Document(page_content="", metadata={"image_paths": json.dumps(["dbv2/images/../../secret.txt"])})
+        found = [i for i in ids if i in records] if ids is not None else list(records)
+        if where:
+            found = [i for i in found if records[i].metadata.get("source") == where["source"]]
+        result = {"ids": found, "metadatas": [records[i].metadata for i in found]}
+        if "documents" in include:
+            result["documents"] = [records[i].page_content for i in found]
+        return result
 
 
 class FakeBackend:
@@ -583,7 +605,7 @@ def test_every_route_and_error_is_described(client):
     """Each operation has a summary and description, and each error a schema."""
     spec = client.get("/openapi.json").json()
     assert "base64" not in spec["info"]["description"], "responses carry figure URLs, not bytes"
-    assert {tag["name"] for tag in spec["tags"]} == {"query", "retrieval", "images", "system"}
+    assert {tag["name"] for tag in spec["tags"]} == {"query", "retrieval", "documents", "images", "system"}
     for path, operations in spec["paths"].items():
         for method, operation in operations.items():
             assert operation.get("summary") and operation.get("description"), f"{method} {path}"
@@ -596,3 +618,58 @@ def test_every_route_and_error_is_described(client):
                 assert schema == {"$ref": "#/components/schemas/ValidationErrorResponse"}, f"{method} {path}"
     issue = spec["components"]["schemas"]["ValidationIssue"]["properties"]
     assert "input" not in issue, "the 422 handler strips the rejected value"
+
+
+def test_documents_lists_each_source_with_counts(client):
+    """A record with no source names no document, so it is left out."""
+    response = client.get("/v1/documents")
+    assert response.status_code == 200
+    assert response.json() == {
+        "items": [
+            {"id": "lm317", "chunk_count": 2, "image_count": 0, "table_count": 1},
+            {"id": "tlv1117", "chunk_count": 1, "image_count": 1, "table_count": 0},
+        ],
+        "total": 2,
+    }
+
+
+def test_document_chunks_come_in_reading_order(client):
+    body = client.get("/v1/documents/lm317/chunks").json()
+    assert body["total"] == 2 and body["offset"] == 0 and body["limit"] == 50
+    first, second = body["items"]
+    assert [first["chunk_id"], second["chunk_id"]] == [1, 2]
+    assert first["record_id"] == LM317_FIRST_ID
+    assert second["raw_text"] == "Pin 1 ADJ, pin 2 VOUT, pin 3 VIN."
+    assert second["tables_html"] == ["<table><tr><td>ADJ</td></tr></table>"]
+    assert second["has_table"] and not second["has_image"]
+
+
+def test_document_chunks_carry_figure_urls_that_serve(client):
+    chunk = client.get("/v1/documents/tlv1117/chunks").json()["items"][0]
+    assert chunk["image_urls"] == [f"/v1/images/{TLV1117_ID}/0"]
+    assert client.get(chunk["image_urls"][0]).content == JPEG_BYTES
+
+
+def test_document_chunks_page_with_offset_and_limit(client):
+    page = client.get("/v1/documents/lm317/chunks", params={"offset": 1, "limit": 1}).json()
+    assert [c["chunk_id"] for c in page["items"]] == [2]
+    assert (page["total"], page["offset"], page["limit"]) == (2, 1, 1)
+    past_end = client.get("/v1/documents/lm317/chunks", params={"offset": 5}).json()
+    assert past_end["items"] == [] and past_end["total"] == 2
+
+
+def test_unknown_document_is_404(client):
+    response = client.get("/v1/documents/nope/chunks")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Document not found: nope"}
+
+
+@pytest.mark.parametrize("params", [{"limit": 0}, {"limit": 201}, {"offset": -1}])
+def test_document_chunks_reject_bad_paging(client, params):
+    assert client.get("/v1/documents/lm317/chunks", params=params).status_code == 422
+
+
+def test_browsing_with_broken_store_is_503(client, backend):
+    backend.store_error = "disk gone"
+    assert client.get("/v1/documents").status_code == 503
+    assert client.get("/v1/documents/lm317/chunks").status_code == 503
