@@ -18,8 +18,8 @@ WORKDIR /app
 # Backend-only dependencies (ingestion/dashboard libs stay out of the image).
 # Embeddings are a watsonx.ai API call, so no ML framework runs in this image.
 # Copy requirements first so layer caching kicks in on code-only changes.
-COPY requirements-api.txt .
-RUN pip install --no-cache-dir -r requirements-api.txt
+COPY api/requirements.txt api/requirements.txt
+RUN pip install --no-cache-dir -r api/requirements.txt
 
 # .dockerignore is an allowlist, so this copies only the backend code (api/,
 # src/, config/) and the pre-built vector store with its figures (dbv2/).

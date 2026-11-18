@@ -12,9 +12,6 @@
 # stored chunk metadata points at.
 !dbv2
 
-# Installed in its own layer before the code is copied.
-!requirements-api.txt
-
 # Re-exclude build litter inside the folders allowed above.
 **/__pycache__
 **/*.pyc
