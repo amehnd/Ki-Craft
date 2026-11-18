@@ -1270,7 +1270,7 @@ def render_analytics(data: list[dict]) -> None:
             x="images",
             title="Distribution of Images per Chunk",
             labels={"images": "Image Count", "count": "Chunks"},
-            nbins=df["images"].max() + 1,
+            nbins=int(df["images"].max()) + 1,
         )
         st.plotly_chart(fig1, width="stretch")
     with col2:
@@ -1279,7 +1279,7 @@ def render_analytics(data: list[dict]) -> None:
             x="tables",
             title="Distribution of Tables per Chunk",
             labels={"tables": "Table Count", "count": "Chunks"},
-            nbins=df["tables"].max() + 1,
+            nbins=int(df["tables"].max()) + 1,
         )
         st.plotly_chart(fig2, width="stretch")
 
