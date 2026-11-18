@@ -1,8 +1,10 @@
-# Multimodal RAG for electronics documents
+# KI-CRAFT
 
-Ask questions about datasheets and application notes and get answers built from the text, the tables, and the figures in the document.
+**An open-source, AI-assisted PCB design and EDA toolkit, built to work alongside KiCad.**
 
-A PDF is split into sections, a vision model writes a searchable summary of each section, and the summaries are embedded and stored. At query time the nearest sections are retrieved, their original text, tables, and figures are rebuilt, and a multimodal LLM answers from them.
+KI-CRAFT aims to bring the same help to open tools: read the datasheets for you, check your schematic against them, and, step by step, draft schematics and assist with layout.
+
+It starts where every design starts: the datasheet. Today it answers questions about datasheets and application notes from their text, tables and figures, and shows the figure each answer relied on.
 
 <div align="center">
 
@@ -16,49 +18,41 @@ A PDF is split into sections, a vision model writes a searchable summary of each
 
 </div>
 
-## Contents
-
-- [What is in the repository](#what-is-in-the-repository)
-- [Screenshots](#screenshots)
-- [Architecture](#architecture)
-- [Quick start](#quick-start)
-- [Environment variables](#environment-variables)
-- [Running the API](#running-the-api)
-- [Running the dashboard](#running-the-dashboard)
-- [Running with Docker](#running-with-docker)
-- [Tests](#tests)
-- [Ingesting a new PDF](#ingesting-a-new-pdf)
-- [Configuration](#configuration)
-- [Project structure](#project-structure)
-- [Project status and documentation](#project-status-and-documentation)
-
-## What is in the repository
-
-- **A FastAPI backend** (`api/`) that retrieves chunks and generates answers, with a streaming endpoint.
-- **A Streamlit dashboard** (`app/`) for asking questions and inspecting every stored chunk.
-- **An offline ingestion pipeline** (`src/ingestion/`) that turns a PDF into chunks, summaries, and vectors.
-- **A pre-built vector store** (`dbv2/`), so the API answers questions straight after cloning, with no ingestion run.
-
-The store ships with six documents: 310 chunks and 276 figures. Each document's source name is its PDF's file name in `data/` without `.pdf`, and its chunk export is `json/<source>.json`.
-
-| Document | Source name in the store | Chunks |
-|---|---|---|
-| Microchip AN699 (anti-aliasing filters) | `AN699` | 29 |
-| LM555 timer | `lm555` | 35 |
-| LM2596 step-down regulator | `lm2596` | 71 |
-| LM317 adjustable regulator | `lm317` | 51 |
-| NE555 precision timer | `ne555` | 47 |
-| TLV1117 LDO regulator | `tlv1117` | 77 |
-
-## Screenshots
-
 | Chunk Explorer | Dataset Analytics | Query & Retrieve |
 |---|---|---|
 | ![chunk-explorer](assets/dashboard-chunk-explorer.png) | ![analytics](assets/dashboard-analytics.png) | ![query](assets/dashboard-query.png) |
 
-## Architecture
+## Who it is for
 
-There are two pipelines that meet at the vector store. Ingestion runs offline, once per document. The query path runs on every request.
+- **KiCad users tired of drawing schematics by hand** and cross-checking every pin, capacitor value and footnote against a 60-page PDF.
+- **Hardware engineers** checking a design: dropout at a given load, the output voltage formula, the recommended layout, with the source figure to verify against.
+- **Students and makers** learning to read datasheets: what a pin does, "typical" versus "maximum", what a graph shows.
+- **Teams who want an open alternative** to closed AI EDA tools, one they can run, inspect and extend.
+
+## Status
+
+| Phase | Goal | Progress |
+|---|---|---|
+| 1. Datasheet assistant | Trustworthy answers from datasheets: text, tables, figures, cited | `████░░░░░░` 40%, in progress |
+| 2. Schematic review | Check a KiCad schematic against the datasheets of its parts: pins, feedback dividers, decoupling | `░░░░░░░░░░` planned |
+| 3. Design agent | Draft schematics in KiCad from requirements, and assist with placement and layout | `░░░░░░░░░░` planned |
+
+Phase 1 so far: a cleaned-up, explainable codebase, an API with streaming answers and labelled figure citations, and a pipeline that ingests any PDF. Next: an evaluation set that measures accuracy, Postgres with hybrid search, uploading your own PDFs through the API with page-level citations, and a hosted demo.
+
+## What it does today
+
+- **Answers from text, tables and figures.** The model gets each relevant section's original text, its tables and its figures, not just the paragraphs.
+- **Shows its evidence.** Every answer lists the figures the model saw, and cites them as `[F1]`, `[F2]`.
+- **Refuses to guess.** It says when the documents do not state something, keeps units and test conditions, and never mixes values from different parts.
+- **Brings your own model.** Gemini by default; any model from Gemini, OpenAI, Groq or Hugging Face with your own key.
+- **Ingests new PDFs** with a hosted vision model or one that runs locally on a Mac.
+
+Six datasheets and application notes ship ready to query: LM317, LM2596, LM555, NE555, TLV1117 and Microchip AN699.
+
+<details>
+<summary><b>How it works</b></summary>
+
+A vision model writes a plain-text summary of each section of a PDF, covering its prose, tables and figures. The summaries are embedded and searched; the original text, tables and figures are stored alongside, so each answer is written from the source material, not from the summary.
 
 ```mermaid
 flowchart TB
@@ -68,7 +62,7 @@ flowchart TB
         direction TB
         PART["extract.py<br/>unstructured partition_pdf, hi_res"]
         CHUNK["chunk.py<br/>chunk_by_title, max 3000 chars"]
-        ENRICH["enrich.py<br/>vision LLM summary per chunk (GLM-4.5V)"]
+        ENRICH["enrich.py<br/>vision LLM summary per chunk<br/>(GLM-4.5V hosted, or Qwen3.5-4B local)"]
         BUILD["pipeline.py (scripts/ingest.py)<br/>embed each summary (watsonx Granite, 768 dims),<br/>write figure files"]
         PART --> CHUNK --> ENRICH
     end
@@ -85,7 +79,7 @@ flowchart TB
         EMBED_Q["src/embed.py<br/>embed the question"]
         MMR["search.py<br/>MMR, keep 5 of 20"]
         REBUILD["src/documents.py<br/>rebuild text, tables, figures"]
-        GEN["generate.py<br/>multimodal prompt, Gemini 3.5 Flash-Lite"]
+        GEN["prompt.py, generate.py<br/>multimodal prompt, Gemini 3.5 Flash-Lite"]
         ANSWER["answer"]
         Q --> EMBED_Q --> MMR --> REBUILD --> GEN --> ANSWER
     end
@@ -106,383 +100,24 @@ flowchart TB
     JSON --> EXPLORE
 ```
 
-### Why only the summary is embedded
+</details>
 
-A raw datasheet chunk mixes prose, an HTML table, and figures, and an embedding model reads only text. The vision model writes one plain-text summary that describes all three, and that summary is what gets embedded and searched. The original text, the tables, and the figure paths ride along as metadata, so the answer is built from the source material, not from the summary.
+## Getting started
 
-### How each kind of content is handled
+Setup, running the API and the dashboard, ingesting your own PDFs and Docker are covered in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-| Content | Extraction | Storage | At query time |
-|---|---|---|---|
-| Text | `partition_pdf` returns the text of each element | `raw_text` in the chunk metadata | Added to the prompt as written |
-| Tables | `infer_table_structure=True` produces HTML tables | `tables_html` (a JSON list) in the chunk metadata | Added to the prompt as HTML |
-| Figures | `extract_image_block_types=["Image"]` returns each figure | A JPEG in `dbv2/images`; its path in `image_paths` | Attached to the prompt as images and served to the UI by URL |
-
-### The stack
-
-| Step | What runs | Where |
-|---|---|---|
-| PDF parsing | `unstructured` with the `hi_res` strategy | local, ingestion only |
-| Chunking | `chunk_by_title` | local, ingestion only |
-| Summaries | `zai-org/GLM-4.5V` through the Hugging Face router | hosted, ingestion only |
-| Embeddings | `ibm/granite-embedding-278m-multilingual` (768 dimensions) | IBM watsonx.ai |
-| Vector store | Chroma, cosine similarity, HNSW index | embedded, on disk in `dbv2/chroma_db` |
-| Retrieval | MMR by default: fetch the 20 nearest chunks, keep the 5 (`top_k`) that are relevant but differ from each other | `src/retrieval/search.py` |
-| Generation | `gemini-3.5-flash-lite`; other providers through the `llm` object of `/v1/query`, with the caller's key | Google Gemini API |
-| Tracing | LangSmith (optional) | hosted |
-
-The terms used here (MMR, HNSW, SSE, and so on) are explained in [docs/GLOSSARY.md](docs/GLOSSARY.md).
-
-## Quick start
-
-You need Python 3.13 and three credentials: a Gemini API key, and a watsonx.ai API key with its project id. The vector store is already built, so no PDF parsing tools are needed to run the API and the dashboard.
-
-Clone the repository:
-
-```bash
-git clone https://github.com/moksh-m9u/Multimodal-Rag.git
-```
-
-```bash
-cd Multimodal-Rag
-```
-
-Install [uv](https://docs.astral.sh/uv/), then create the virtual environment and install every dependency (API, dashboard, ingestion, tests). `pyproject.toml` lists them and `uv.lock` pins the exact versions:
-
-```bash
-uv sync
-```
-
-```bash
-source .venv/bin/activate
-```
-
-Two shorter lists exist for deployments: `requirements-api.txt` is what the Docker image installs for the API, and `app/requirements.txt` is what Streamlit Community Cloud installs for the dashboard.
-
-Create a `.env` file in the repository root with the variables from [Environment variables](#environment-variables), then check that the code imports and the tests pass:
-
-```bash
-python -m pytest -q -p no:cacheprovider
-```
-
-Start the API in one terminal:
-
-```bash
-uvicorn api.main:app --reload --port 8001
-```
-
-Start the dashboard in a second terminal (activate the virtual environment there too):
-
-```bash
-API_BASE_URL=http://127.0.0.1:8001 streamlit run app/dashboard.py
-```
-
-Open http://localhost:8501 and ask a question on the Query & Retrieve page.
-
-## Environment variables
-
-Put these in `.env` in the repository root. Write the values without quotes: `docker run --env-file` reads each line literally, so a quoted value reaches the container with the quotes included. `.env` is ignored by git; never commit it.
-
-```
-GEMINI_API_KEY=your_gemini_api_key
-WATSONX_API_KEY=your_ibm_cloud_api_key
-WATSONX_PROJECT_ID=your_watsonx_project_id
-WATSONX_URL=https://eu-de.ml.cloud.ibm.com
-```
-
-| Variable | Needed for | Notes |
-|---|---|---|
-| `GEMINI_API_KEY` | Answer generation | Create one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
-| `WATSONX_API_KEY` | Embedding every question, and every chunk at ingestion | An IBM Cloud API key |
-| `WATSONX_PROJECT_ID` | Same | The id of your watsonx.ai project |
-| `WATSONX_URL` | Same | Region endpoint; defaults to `https://eu-de.ml.cloud.ibm.com` |
-| `HF_TOKEN` | Ingestion only (chunk summaries) | Create one at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
-| `API_BASE_URL` | Dashboard | Where the dashboard finds the API; defaults to `http://localhost:8000` |
-| `CORS_ALLOWED_ORIGINS` | API | Comma-separated origins allowed to call the API from a browser |
-| `GENERATION_MAX_TOKENS` | API | Output token limit per answer; defaults to 512 |
-| `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT` | Optional tracing | Leave unset to run without tracing. `LANGSMITH_TRACING=false` turns tracing off even when `.env` has the older `LANGCHAIN_TRACING_V2=true` |
-| `UNSTRUCTURED_API_KEY`, `UNSTRUCTURED_URL` | Not used by the code yet | For Unstructured's hosted Parse API, the planned production parser |
-
-## Running the API
-
-```bash
-uvicorn api.main:app --reload --port 8001
-```
-
-The first request to `/health` should return `{"status":"ok","vector_store":"loaded"}`:
-
-```bash
-curl http://127.0.0.1:8001/health
-```
-
-Interactive documentation is at http://127.0.0.1:8001/docs.
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/` | Lists the endpoints |
-| GET | `/health` | Reports whether the vector store loaded |
-| POST | `/v1/retrieve` | Returns the retrieved chunks, with no LLM call |
-| POST | `/v1/query` | Retrieves, then answers with the default model, or with the provider, model and key in an optional `llm` object |
-| POST | `/v1/query/stream` | The same, streamed token by token over Server-Sent Events |
-| GET | `/v1/images/{record_id}/{position}` | Serves one figure of a stored chunk, at a stable URL |
-
-Retrieve chunks only:
-
-```bash
-curl -X POST http://127.0.0.1:8001/v1/retrieve -H 'Content-Type: application/json' -d '{"query": "LM555 astable operation frequency formula", "top_k": 10}'
-```
-
-Ask a question:
-
-```bash
-curl -X POST http://127.0.0.1:8001/v1/query -H 'Content-Type: application/json' -d '{"query": "What is the dropout voltage of the TLV1117?"}'
-```
-
-Ask with another model and your own key (the API has no server-side key for other providers, so `api_key` is required whenever `llm` is sent):
-
-```bash
-curl -X POST http://127.0.0.1:8001/v1/query -H 'Content-Type: application/json' -d '{"query": "What is the dropout voltage of the TLV1117?", "top_k": 5, "max_images": 3, "llm": {"provider": "groq", "model": "openai/gpt-oss-120b", "api_key": "YOUR_GROQ_API_KEY", "max_tokens": 2048}}'
-```
-
-Stream an answer:
-
-```bash
-curl -N http://127.0.0.1:8001/v1/query/stream -H 'Content-Type: application/json' -d '{"query": "What is the output voltage range of the LM317?"}'
-```
-
-The full request and response shapes are in [docs/API.md](docs/API.md).
-
-Opening the Chroma store rewrites tracked files under `dbv2/chroma_db`. After running the API from a clone you intend to commit from, restore them:
-
-```bash
-git checkout -- dbv2/chroma_db
-```
-
-## Running the dashboard
-
-```bash
-API_BASE_URL=http://127.0.0.1:8001 streamlit run app/dashboard.py
-```
-
-| Page | Purpose | Data source |
-|---|---|---|
-| Home | Overview of the pages | none |
-| Query & Retrieve | Ask a question, watch the answer stream, see the chunks and figures behind it | the API |
-| Chunk Explorer | Browse every chunk: summary, raw text, tables, figures, health score | `json/*.json` |
-| Compare Chunks | Two chunks side by side | `json/*.json` |
-| Dataset Analytics | Histograms and top-20 lists per document | `json/*.json` |
-
-The three browsing pages still read the JSON exports from disk instead of asking the API. Moving them behind the API is planned (Checkpoint 4 in [AGENTS.md](AGENTS.md)).
-
-A second, smaller app shows evaluation results:
-
-```bash
-streamlit run app/rag_eval_dashboard.py
-```
-
-## Running with Docker
-
-The image contains only the backend code and the pre-built store (`api/`, `src/`, `config/`, `dbv2/`). It is about 1.17 GB and holds no secrets; credentials are passed at run time.
-
-Build:
-
-```bash
-docker build -t multimodal-rag-api .
-```
-
-Run:
-
-```bash
-docker run --rm -p 8000:8000 --env-file .env multimodal-rag-api
-```
-
-Check:
-
-```bash
-curl http://127.0.0.1:8000/health
-```
-
-On an Apple Silicon Mac the build above produces a `linux/arm64` image. To build for an amd64 server and push it to Docker Hub, log in and replace `<user>` with your Docker Hub username:
-
-```bash
-docker login
-```
-
-```bash
-docker buildx build --platform linux/amd64 -t <user>/multimodal-rag-api:latest --push .
-```
-
-## Tests
-
-The suite runs without network access; external clients are mocked.
-
-```bash
-python -m pytest -q -p no:cacheprovider
-```
-
-Run one file or one test:
-
-```bash
-python -m pytest -q -p no:cacheprovider tests/test_embed.py
-```
-
-## Ingesting a new PDF
-
-Ingestion is not needed to use the five documents that ship with the repository. Read this section before running it:
-
-- It calls a vision model once for every chunk with tables or figures. `--backend huggingface` (the default) uses GLM-4.5V on the Hugging Face router, which needs `HF_TOKEN` and credit. `--backend local` uses a model on your Mac through `mlx_vlm.server`; see below.
-- It calls watsonx once per chunk for the embedding.
-- It writes to the tracked store in `dbv2/chroma_db`, so it changes files that git tracks.
-- One script, `scripts/ingest.py`, takes either input. Both store records the same way (`src/ingestion/pipeline.py:documents_from_export`): each figure becomes a file in `dbv2/images`, and the record holds its path and a `source` name.
-
-| Input | What it does |
-|---|---|
-| a PDF, or a folder of PDFs | Parses, chunks, summarises, writes the export to `json/<pdf name>.json`, then stores the records. It skips a PDF whose export already exists |
-| a `json/<name>.json` export | Embeds the existing summaries and stores the records, with no summarising. It refuses a document the store already holds unless `--replace` is given; replacing embeds first and only then removes the old records and figures |
-
-PDF parsing needs system packages:
-
-```bash
-brew install poppler tesseract libmagic pandoc
-```
-
-On Ubuntu or Debian:
-
-```bash
-sudo apt-get install -y poppler-utils tesseract-ocr libmagic1 pandoc
-```
-
-Run the pipeline on one PDF:
-
-```bash
-python -m scripts.ingest path/to/document.pdf
-```
-
-### Summarising with a local model
-
-`mlx-vlm` is an optional extra that installs only on Apple silicon:
-
-```bash
-uv sync --extra local
-```
-
-Start the model server in its own terminal and leave it running. The first start downloads the model (about 3 GB) into the Hugging Face cache:
-
-```bash
-python -m mlx_vlm.server --model mlx-community/Qwen3.5-4B-MLX-4bit --host 127.0.0.1 --port 8080
-```
-
-Then ingest one PDF, or every PDF in a folder:
-
-```bash
-python -m scripts.ingest data/ --backend local
-```
-
-To check the summaries before they reach the store, write only the export to `json/` and send the records and figures to a scratch folder. The dashboard lists every `json/*.json`, so the new document can be read in the chunk inspector:
-
-```bash
-python -m scripts.ingest data/ne555.pdf --backend local --store /tmp/trial/chroma_db --images /tmp/trial/images
-```
-
-Once the summaries look right, store that export as it is, with no summary model call (it is refused if the store already holds that document):
-
-```bash
-python -m scripts.ingest json/ne555.json
-```
-
-Each PDF is done in full or not at all. A PDF whose export (`json/<name>.json`) already exists is skipped, and a PDF that fails is logged while the batch carries on, so an interrupted overnight run resumes with the same command. `--store`, `--images` and `--exports` write somewhere other than the tracked store, for a trial run.
-
-The summary settings are environment variables (defaults in `config/settings.py`):
-
-| Variable | Default | What it does |
-|---|---|---|
-| `ENHANCEMENT_BACKEND` | `huggingface` | `huggingface` or `local`; `--backend` overrides it |
-| `LOCAL_ENHANCEMENT_BASE_URL` | `http://127.0.0.1:8080/v1` | Where `mlx_vlm.server` listens |
-| `LOCAL_ENHANCEMENT_MODEL` | `mlx-community/Qwen3.5-4B-MLX-4bit` | Model id sent to the server |
-| `ENHANCEMENT_MAX_TOKENS` | `512` | Longest summary; the embedder reads only the first 512 tokens |
-| `ENHANCEMENT_TEMPERATURE` | `0.0` | Sampling temperature |
-| `ENHANCEMENT_TIMEOUT_SECONDS` | `300` | One call's time limit before a retry |
-| `ENHANCEMENT_MAX_RETRIES` | `2` | Retries, with exponential backoff, before the PDF fails |
-| `ENHANCEMENT_MAX_IMAGES` | `0` | Most figures per call (0 = all) |
-| `LOCAL_ENHANCEMENT_MAX_PIXELS` | `1003520` | Figures larger than this area are downscaled by the server |
-| `LOCAL_ENHANCEMENT_REPETITION_PENALTY` | `1.1` | Discourages repeated lines |
-| `LOCAL_ENHANCEMENT_THINKING` | `false` | Lets the model reason first (spends `ENHANCEMENT_MAX_TOKENS`) |
-
-Uploading a PDF through the API, with a hosted parser in production, is the goal of Checkpoint 7 in [AGENTS.md](AGENTS.md).
-
-## Configuration
-
-Every tunable lives in `config/settings.py`.
-
-| Setting | Value | Purpose |
-|---|---|---|
-| `EMBEDDING_MODEL` | `ibm/granite-embedding-278m-multilingual` | Embedding model on watsonx.ai; changing it means re-indexing |
-| `EMBEDDING_MAX_INPUT_TOKENS` | `512` | The model's input limit; longer text is truncated |
-| `GENERATION_MODEL` | `gemini-3.5-flash-lite` | Default answer model |
-| `GENERATION_MAX_TOKENS` | `512` | Output limit per answer (environment variable) |
-| `GENERATION_MAX_IMAGES` | `3` | Most figures sent to the model, in chunk order; 0 sends all (environment variable) |
-| `RETRIEVAL_SEARCH_TYPE` | `mmr` | `similarity`, `mmr`, or `similarity_score_threshold` (environment variable; anything else stops startup) |
-| `RETRIEVAL_K` | `5` | Chunks returned; all of them go to the model (environment variable) |
-| `RETRIEVAL_FETCH_K` | `20` | MMR only: candidates fetched before MMR picks `RETRIEVAL_K` (environment variable) |
-| `RETRIEVAL_LAMBDA_MULT` | `0.5` | MMR only: 1 is pure relevance, 0 is pure diversity (environment variable) |
-| `RETRIEVAL_SCORE_THRESHOLD` | `0.5` | `similarity_score_threshold` only: minimum relevance score (environment variable) |
-| `CHROMA_PERSIST_DIR` | `dbv2/chroma_db` | Vector store location |
-| `IMAGES_DIR` | `dbv2/images` | Figure files |
-| `PDF_STRATEGY` | `hi_res` | `unstructured` parsing mode |
-| `CHUNK_MAX_CHARACTERS` | `3000` | Largest chunk |
-| `ENHANCEMENT_MODEL` | `zai-org/GLM-4.5V` | Vision model that writes the chunk summaries |
-
-The providers and models the `llm` object accepts are listed in `config/providers.py`.
-
-## Project structure
-
-```
-config/
-  settings.py            every tunable and environment variable
-  providers.py           LLM providers and models the llm object accepts
-src/
-  embed.py               the one embedding factory (watsonx Granite)
-  documents.py           turns stored chunk metadata back into text, tables, figures
-  ingestion/             offline: PDF -> elements -> chunks -> summaries -> Chroma
-    extract.py             unstructured partition_pdf
-    chunk.py               chunk_by_title
-    enrich.py              vision LLM summary per chunk
-    export.py              chunks -> JSON export
-    pipeline.py            writes the Chroma store
-  retrieval/
-    search.py              loads Chroma, builds the MMR retriever, retrieves
-    generate.py            builds the multimodal prompt, calls the LLM, streams
-api/
-  main.py                FastAPI app: CORS, lifespan, routers
-  routers/               endpoints by purpose: system, retrieval, query, images
-  service.py             owns the store and retriever, picks the default LLM
-  images.py              serves figure JPEGs by URL
-  schemas.py             request and response models
-app/
-  dashboard.py           Streamlit UI
-  api_client.py          the only place the UI talks to the backend
-  rag_eval_dashboard.py  Streamlit viewer for evaluation results
-scripts/                 command-line ingestion (scripts/ingest.py)
-dbv2/                    the built Chroma store and the figure images
-json/                    per-document chunk exports used by the dashboard
-data/                    source PDFs
-evals/                   evaluation questions and notes
-tests/                   pytest suite (no network)
-docs/                    trade-offs, product research, glossary
-Dockerfile               backend image
-pyproject.toml, uv.lock  every dependency, with exact versions (uv sync)
-requirements-api.txt     the backend only (used by the Dockerfile)
-app/requirements.txt     the dashboard only (used by Streamlit Community Cloud)
-```
-
-## Project status and documentation
-
-The current phase is a refactor that makes the codebase small and explainable before new features are added. Planned next, in order: a split of the API into routers with a `/v1` prefix, an evaluation baseline, a move from Chroma to Postgres with pgvector, and PDF upload through the API.
+## Documentation
 
 | Document | What it holds |
 |---|---|
-| [AGENTS.md](AGENTS.md) | Working rules, architecture rules, decisions made, and the checkpoint plan with its status |
-| [docs/TRADEOFFS.md](docs/TRADEOFFS.md) | Why each component is built the way it is, the alternatives, and the current choice |
-| [docs/PRODUCT_RESEARCH.md](docs/PRODUCT_RESEARCH.md) | What people who upload datasheets need, and where this project can stand out |
-| [docs/GLOSSARY.md](docs/GLOSSARY.md) | Plain-language explanations of the technical terms |
-| [docs/API.md](docs/API.md) | Request and response shapes for every endpoint |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Setup, running each part, ingestion, Docker, configuration, and conventions for changes |
+| [docs/TRADEOFFS.md](docs/TRADEOFFS.md) | Why each component is built the way it is, and what was considered instead |
+| [docs/PRODUCT_RESEARCH.md](docs/PRODUCT_RESEARCH.md) | What people designing with datasheets need, existing tools, and where this project can stand out |
+
+## Contributing
+
+Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), or open a [GitHub issue](https://github.com/moksh-m9u/Multimodal-Rag/issues) to discuss an idea.
+
+## License
+
+[Apache 2.0](LICENSE)

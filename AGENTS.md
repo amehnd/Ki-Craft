@@ -5,6 +5,7 @@ Instructions for any coding agent (Claude Code, Codex, Cursor, and others) worki
 - `docs/TRADEOFFS.md`: why each component is built the way it is, the alternatives, and the current recommendation.
 - `docs/PRODUCT_RESEARCH.md`: what users who upload datasheets and PCB documents actually need, and where this project can stand out.
 - `docs/GLOSSARY.md`: plain-language explanations of the technical terms used in the code and the docs.
+- `CONTRIBUTING.md`: setup, running each part, ingestion, Docker, configuration, and which dependency file a new package goes in. The README is the product page: the vision (an open-source, AI-assisted PCB design and EDA toolkit next to KiCad), who it is for, status by phase, what works today, and links to `CONTRIBUTING.md`, `docs/TRADEOFFS.md` and `docs/PRODUCT_RESEARCH.md` only; the other docs are internal. Keep its Status table in step with the checkpoints below.
 
 ## Why this repository exists
 
@@ -105,9 +106,11 @@ api/routers/            endpoints by purpose: system, retrieval, query, images
 api/openapi_examples.py docs text and example payloads shown at /docs
 api/service.py          RAGService: owns the store and retriever, picks the default LLM
 api/schemas.py          Pydantic request and response models
+api/requirements.txt    the packages the Docker image installs for the API
 app/dashboard.py        Streamlit UI (2,100 lines, to be split into pages)
 app/api_client.py       the only place the UI talks to the backend
 app/rag_eval_dashboard.py  Streamlit viewer for evaluation results
+app/requirements.txt    the packages Streamlit Community Cloud installs for the dashboard
 scripts/                CLI ingestion: PDFs or json/ exports into the store (scripts/ingest.py)
 dbv2/                   the built Chroma store and extracted figure images
 json/                   per-document chunk exports (summaries included) used to build dbv2
@@ -127,7 +130,7 @@ Query (online):       question -> embed -> Chroma MMR (k=5 of 20) -> rebuild tex
 
 ## Commands
 
-Use the project virtual environment at `/Users/moksh/Multimodal-Rag/.venv` (Python 3.13). A stale Homebrew `uvicorn` exists on the machine, so always call the venv binaries or activate the venv first. `pyproject.toml` is the one dependency list and `uv.lock` pins it; `uv sync` installs both, and `uv lock` refreshes the lock after `pyproject.toml` changes. `requirements-api.txt` (the Docker image) and `app/requirements.txt` (Streamlit Community Cloud) are deliberate subsets.
+Use the project virtual environment at `/Users/moksh/Multimodal-Rag/.venv` (Python 3.13). A stale Homebrew `uvicorn` exists on the machine, so always call the venv binaries or activate the venv first. `pyproject.toml` is the one dependency list and `uv.lock` pins it; `uv sync` installs both, and `uv lock` refreshes the lock after `pyproject.toml` changes. `api/requirements.txt` (the Docker image) and `app/requirements.txt` (Streamlit Community Cloud) are deliberate subsets; the Dependencies section of `CONTRIBUTING.md` says which list a new package goes in.
 
 ```bash
 source .venv/bin/activate
@@ -164,7 +167,7 @@ Notes:
 
 `GEMINI_API_KEY`, `HF_TOKEN`, `WATSONX_API_KEY`, `WATSONX_PROJECT_ID`, `WATSONX_URL`, `API_BASE_URL`, `CORS_ALLOWED_ORIGINS`, `GENERATION_MAX_TOKENS`, and the LangSmith variables (`LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`). See `config/settings.py` for defaults. `LANGSMITH_TRACING` is the one tracing switch: when it is unset the legacy `LANGCHAIN_TRACING_V2` is used, and `config/settings.py` writes the result to `LANGSMITH_TRACING_V2`, which the langsmith library checks first.
 
-Ingestion summaries: `ENHANCEMENT_BACKEND` (`huggingface` or `local`) and the `ENHANCEMENT_*` and `LOCAL_ENHANCEMENT_*` tunables; see the README's ingestion section.
+Ingestion summaries: `ENHANCEMENT_BACKEND` (`huggingface` or `local`) and the `ENHANCEMENT_*` and `LOCAL_ENHANCEMENT_*` tunables; see the ingestion section of `CONTRIBUTING.md`.
 
 Also present in `.env` for the hosted parser: `UNSTRUCTURED_API_KEY` and `UNSTRUCTURED_URL` (the v2 Transform API). A planned `PARSER_BACKEND` (`local` in development, `hosted` in production) will choose between local hi_res and the hosted Parse API; see `docs/TRADEOFFS.md`, section 1.
 
@@ -205,7 +208,7 @@ Each checkpoint is a set of small commits. Finish one, let the owner test and pu
 **Checkpoint 1. Repository hygiene.** Status: done (2026-11-14).
 - Done: removed `chunks_export.json`, `rag_results.json`, `notebooks/raw.md`, `scripts/test_single_image_trace.py`, and the `last_prompt.txt` debug write. The owner chose to keep `parsed_pdf/` and the notebook; `queries.txt` was removed on 2026-11-16.
 - Done: dropped `torch`, `transformers`, and the OpenCV system libraries from the API image; a local `docker build` and `/health` check passed on 2026-11-13. `docker run --env-file` does not strip quotes, so `.env` values must be unquoted.
-- Done: `.dockerignore` is an allowlist (`api/`, `src/`, `config/`, `dbv2/`, `requirements-api.txt`). The image went from 1.34 GB to 1.17 GB.
+- Done: `.dockerignore` is an allowlist (`api/`, `src/`, `config/`, `dbv2/`, `requirements-api.txt`). The image went from 1.34 GB to 1.17 GB. The list moved to `api/requirements.txt` on 2026-11-17, so `api/` now brings it in.
 - Done: fixed the LM555 data bug on 2026-11-14. `json/LM555TImer.json` was a copy of the TLV1117 export, and the store held TLV1117 twice (the second copy under the source `chunks_huggingface`) and no LM555. The real LM555 export (36 chunks, formerly the root `chunks_huggingface.json`) now lives at `json/LM555TImer.json`, its 36 summaries were embedded with watsonx, and the 78 duplicate records and their 74 figure files were removed. The store holds 270 records and 267 figures.
 - Done: rewrote the README for the current stack (watsonx, Gemini 3.5 Flash-Lite, k=10 of 20) with the setup, API, Docker, and test commands, and corrected the storage label in the dashboard's Home page diagram.
 - Source names cleaned up on 2026-11-16: every document's `source` is its PDF's file name in `data/` without `.pdf` (`AN699`, `lm555`, `lm2596`, `lm317`, `ne555`, `tlv1117`), as `scripts/ingest.py` names new documents. The exports (`json/<source>.json`), the figure files (`dbv2/images/<source>_c<n>_img<i>.jpg`), `data/datasheet.pdf` (now `data/lm555.pdf`) and each record's `source` and `image_paths` were renamed in place; record ids, summaries and embeddings did not change, so figure URLs still work.
@@ -243,6 +246,7 @@ Each checkpoint is a set of small commits. Finish one, let the owner test and pu
 - Corpus re-summarized 2026-11-16 with the local Qwen3.5-4B backend after page cleanup (AN699, lm2596, lm317, lm555, tlv1117; ne555 was already done) and replaced in `dbv2` with `--replace`: 310 records and 276 figures, longest summary 474 words (was 1,523, past the embedder's 512-token limit).
 - Answer prompt rewritten 2026-11-16 (`src/retrieval/prompt.py:build_messages`). A system message holds the rules: answer only from the context, say when the documents do not state it, never mix values from different documents, keep units and conditions, cite figures as `[F1]`. The user message gives each chunk's document name, summary, original text (`raw_text`, previously never sent) and tables, each figure right after its chunk, and the question last. On three live questions it stopped presenting the LM555 diagram as the NE555's and gave the LM317 reference voltage range (1.2, 1.25, 1.3 V) where it had invented a 4.95 V maximum; prompts are about 40 to 70 percent longer.
 - Dead code and dependency cleanup, 2026-11-17. Deleted `src/tracing.py` (it built a 7-field summary per chunk, of which callers read two counts, for log lines only; `retrieve_chunks` now counts directly and generation logs the prompt size instead of repeating the counts), the unused re-exports in `src/retrieval/__init__.py`, `src/ingestion/__init__.py` and `config/__init__.py`, `SUPPORT_STACK` in the dashboard, the `HUGGINGFACEHUB_API_TOKEN` setting, and the catalogue fields nothing read (`context_window`, `supports_streaming`, `description`). Dependencies: `requirements.txt` is deleted (Streamlit Cloud already used `uv.lock`, which it reads first), `pyproject.toml` no longer pretends to be an installable package (`[tool.uv] package = false`, and its `packages.find` pointed at the wrong folders), `pytest` and `httpx` are a `dev` group, Pillow is out of `requirements-api.txt` (checked with Pillow blocked: the API imports, a Gemini message with a figure converts, 103 backend tests pass), and the dashboard gets `app/requirements.txt`, which Streamlit Cloud reads before the root files. That list has no unstructured and so no OpenCV, which made `packages.txt` (`libgl1`) unnecessary; it is deleted. The deployed dashboard was not redeployed to confirm.
+- Install docs, 2026-11-17: `requirements-api.txt` moved to `api/requirements.txt`, next to the code it serves, as `app/requirements.txt` is (a root `requirements.txt` would read as the full install but hold only the API). It now lists `langsmith` and `pydantic`, which our code imports directly; an import trace from `api.main` found nothing else outside the list. The docs were then split the usual open-source way: the README is the product page (why, who it is for, what it does today, how it works, quick start, roadmap, license), and `CONTRIBUTING.md` holds the full setup, the Dependencies section (which file each deployment installs, where a new package goes), ingestion, Docker, configuration, conventions and troubleshooting. Added `LICENSE` (Apache 2.0, the owner's choice) and `.env.example`. A `docker compose` quick start waits until Checkpoint 4 moves the dashboard fully behind the API. The Docker build with the moved file was not run.
 - Tables in prompts are Markdown since 2026-11-16 (`src/tables.py:table_to_markdown`, used by the answer and summary prompts). Unstructured has no Markdown table output, so tables stay stored as HTML (lossless, rendered by the dashboard) and are converted only when a prompt is built: 32 percent fewer tokens across the 118 stored tables. Merged cells are repeated, a rowspan stops at the end of its section, and empty tables are skipped.
 
 **Checkpoint 4. Frontend separation.**
@@ -281,7 +285,7 @@ Each checkpoint is a set of small commits. Finish one, let the owner test and pu
 **Checkpoint 9. Deployment.**
 - Bring Railway back with the watsonx and database variables.
 - Set `API_BASE_URL` in Streamlit Cloud secrets.
-- Document the deploy in the README.
+- Document the deploy in `CONTRIBUTING.md`.
 
 ## Later phases (not now)
 

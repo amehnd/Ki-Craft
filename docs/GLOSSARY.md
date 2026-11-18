@@ -132,11 +132,11 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **Image.** A read-only snapshot of a filesystem plus a start command. `docker build` produces it from the `Dockerfile`; `docker run` starts a container from it. Here: `multimodal-rag-api`.
 
-**Layer.** One step of the `Dockerfile` (`RUN`, `COPY`) stored as a diff on top of the previous step. Docker reuses a layer when its inputs did not change, which is why `requirements-api.txt` is copied and installed before the code: a code change does not reinstall the packages.
+**Layer.** One step of the `Dockerfile` (`RUN`, `COPY`) stored as a diff on top of the previous step. Docker reuses a layer when its inputs did not change, which is why `api/requirements.txt` is copied and installed before the code: a code change does not reinstall the packages.
 
 **Build context.** The folder `docker build` sends to the Docker engine (the `.` at the end of the command). `COPY . .` can only copy files that are in the context.
 
-**.dockerignore.** A file listing paths to leave out of the build context. Here it is an allowlist: `*` ignores everything and the `!` lines re-include `api/`, `src/`, `config/`, `dbv2/`, and `requirements-api.txt`.
+**.dockerignore.** A file listing paths to leave out of the build context. Here it is an allowlist: `*` ignores everything and the `!` lines re-include `api/`, `src/`, `config/`, and `dbv2/` (the API dependency list, `api/requirements.txt`, comes in with `api/`).
 
 **Allowlist and denylist.** An allowlist names what is permitted and rejects the rest; a denylist names what is rejected and permits the rest. An allowlist is safer by default, because something new is left out until someone adds it.
 
