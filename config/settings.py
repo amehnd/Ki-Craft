@@ -56,7 +56,9 @@ EMBEDDING_MODEL: str = "ibm/granite-embedding-278m-multilingual"
 # The model's context limit; longer inputs are truncated by watsonx.
 EMBEDDING_MAX_INPUT_TOKENS: int = 512
 # "watsonx" calls the hosted service; "local" runs the same model's open weights
-# on this machine (for retrieval without watsonx credentials).
+# on this machine (for retrieval without watsonx credentials). The stored vectors
+# came from the watsonx model, so any replacement must produce vectors in the
+# same space (see src/embed.py).
 EMBEDDING_BACKEND: str = _env_choice("EMBEDDING_BACKEND", "watsonx", ("watsonx", "local"))
 # Open-weights release of the model above; same 768-dim vector space.
 LOCAL_EMBEDDING_MODEL: str = "ibm-granite/granite-embedding-278m-multilingual"

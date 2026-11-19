@@ -8,7 +8,9 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **Cosine similarity.** How close two embeddings are, measured by the angle between them: 1 means the same direction, 0 means unrelated. Chroma and pgvector both rank chunks by it here.
 
-**Normalization.** Scaling an embedding so its length is 1. After that, cosine similarity and the dot product give the same ranking. The local embedding backend normalises every vector (`encode_kwargs`, `src/embed.py`).
+**Vector space.** The set of positions one embedding model puts texts in. Only vectors from the same model share a space, so distances between vectors from different models mean nothing, even when both have 768 numbers. A query must be embedded by the model that built the store; that is why the local backend uses the open weights of the same Granite model. Here: `src/embed.py`.
+
+**Normalization.** Scaling an embedding so its length is 1. After that, cosine similarity and the dot product give the same ranking. The stored vectors already have length 1, and the local embedding backend produces unit-length vectors too (`encode_kwargs`, `src/embed.py`).
 
 **Vector store.** A database that stores embeddings and finds the nearest ones to a query embedding. Here: Chroma today, Postgres with pgvector after Checkpoint 6.
 

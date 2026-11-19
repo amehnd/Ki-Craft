@@ -37,11 +37,11 @@ The vector store is already built, so the API and the dashboard run straight aft
 Clone the repository:
 
 ```bash
-git clone https://github.com/moksh-m9u/Multimodal-Rag.git
+git clone https://github.com/moksh-m9u/Ki-Craft.git
 ```
 
 ```bash
-cd Multimodal-Rag
+cd Ki-Craft
 ```
 
 Create the virtual environment and install every dependency (API, dashboard, ingestion, tests). `pyproject.toml` lists them and `uv.lock` pins the exact versions; uv also downloads Python 3.13 if the machine lacks it:
@@ -80,6 +80,22 @@ API_BASE_URL=http://127.0.0.1:8001 streamlit run app/dashboard.py
 
 Open http://localhost:8501 and ask a question on the Query & Retrieve page.
 
+### Without watsonx credentials
+
+To query the existing store with no watsonx account, run the embedder on your machine. The stored vectors were made by `ibm/granite-embedding-278m-multilingual`, and IBM publishes the same weights as `ibm-granite/granite-embedding-278m-multilingual`, so local queries land in the same vector space (cosine 1.0000 against five stored vectors).
+
+```bash
+uv sync --extra local-embeddings
+```
+
+In `.env`, set `EMBEDDING_BACKEND=local`. The first run downloads the model (about 1.1 GB) from Hugging Face. Then retrieve without any answer model, so no Gemini key is needed:
+
+```bash
+curl -X POST http://127.0.0.1:8001/v1/retrieve -H 'Content-Type: application/json' -d '{"query": "LM317 reference voltage", "top_k": 5}'
+```
+
+Another embedder works only if it produces vectors in that same space. Two separately trained models almost never do, even with 768 dimensions. To check a candidate, embed a few stored summaries with it and compare each with its stored vector; a cosine near 1.0 means the same space, anything much lower means the store must be re-indexed. Keep ingestion on watsonx for now.
+
 ## Environment variables
 
 Copy `.env.example` to `.env` in the repository root and fill in the values. Write the values without quotes: `docker run --env-file` reads each line literally, so a quoted value reaches the container with the quotes included. `.env` is ignored by git; never commit it.
@@ -94,7 +110,8 @@ cp .env.example .env
 | `WATSONX_API_KEY` | Embedding every question, and every chunk at ingestion | An IBM Cloud API key |
 | `WATSONX_PROJECT_ID` | Same | The id of your watsonx.ai project |
 | `WATSONX_URL` | Same | Region endpoint; defaults to `https://eu-de.ml.cloud.ibm.com` |
-| `HF_TOKEN` | Ingestion only (chunk summaries) | Create one at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
+| `EMBEDDING_BACKEND` | Embeddings without watsonx | `watsonx` (default) or `local`; see [Without watsonx credentials](#without-watsonx-credentials) |
+| `HF_TOKEN` | Ingestion (chunk summaries); optionally the local embedding model download | Create one at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens). The local embedding model is public, so the token only raises download limits |
 | `API_BASE_URL` | Dashboard | Where the dashboard finds the API; defaults to `http://localhost:8000` |
 | `CORS_ALLOWED_ORIGINS` | API | Comma-separated origins allowed to call the API from a browser |
 | `GENERATION_MAX_TOKENS` | API | Output token limit per answer; defaults to 512 |
@@ -427,5 +444,6 @@ pyproject.toml, uv.lock  every dependency, with exact versions (uv sync)
 
 - **`uvicorn` starts the wrong Python.** Some machines have a stale Homebrew `uvicorn`. Activate `.venv` first, or call `.venv/bin/uvicorn`.
 - **A plain `uv sync` removed `mlx-vlm`.** `uv sync` makes the environment match the lock exactly, so it drops extras you did not ask for and packages installed by hand. Use `uv sync --extra local`.
+- **A plain `uv sync` removed the local embedding packages.** Use `uv sync --extra local-embeddings`. Without them, `EMBEDDING_BACKEND=local` fails with `No module named 'langchain_huggingface'`.
 - **The Docker container cannot authenticate.** A value in `.env` has quotes; `docker run --env-file` keeps them. Remove them.
 - **`git status` shows changes under `dbv2/chroma_db` you did not make.** Opening the store rewrites them. Run `git checkout -- dbv2/chroma_db`.

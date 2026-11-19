@@ -8,10 +8,23 @@ Embeddings are served by IBM watsonx.ai, so the store must be re-indexed
 whenever ``EMBEDDING_MODEL`` changes: vectors from different models are not
 comparable and usually differ in dimension.
 
-``EMBEDDING_BACKEND=local`` runs the open-weights release of the same Granite
-model on this machine, for querying the existing store without watsonx
-credentials. It normalises vectors; do not ingest with it into a store built
-with watsonx.
+The stored vectors were made by ``ibm/granite-embedding-278m-multilingual`` on
+watsonx. A query must be embedded into that same vector space, or its distances
+to the stored vectors mean nothing. ``EMBEDDING_BACKEND=local`` therefore runs
+the open-weights release of that same model
+(``ibm-granite/granite-embedding-278m-multilingual``) on this machine, so the
+existing store can be queried without watsonx credentials. Another embedder
+works only if it produces vectors in the same space; two separately trained
+models almost never do, even with 768 dimensions. To check a candidate, embed
+some stored summaries with it and compare each with its stored vector: a cosine
+near 1.0 means the same space, anything much lower means the store must be
+re-indexed.
+
+Both backends give unit-length vectors (the stored ones have norm 1.0, and the
+local backend normalises), so queries land where the stored vectors are.
+Ingestion should still use watsonx: the local model runs in bfloat16 on the CPU
+(tiny numeric differences) and its handling of over-long input is not verified
+against watsonx's ``truncate_input_tokens``.
 """
 
 from __future__ import annotations
