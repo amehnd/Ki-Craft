@@ -17,6 +17,7 @@ import asyncio
 from collections.abc import Generator
 from pathlib import Path
 
+from langchain_core.documents import Document
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from config.settings import (
@@ -25,21 +26,39 @@ from config.settings import (
     GENERATION_PROVIDER,
     RETRIEVAL_K,
 )
+from src.browse import document_chunks, list_documents
 from src.documents import chunk_text_and_tables, image_file, stored_image_paths
 from src.embed import load_embedding_model
 from src.llm import accepts_images, default_llm
 from src.logger import get_logger
+from src.retrieval.citations import find_citations
 from src.retrieval.generate import StreamEvent, answer_query_stream
 from src.retrieval.prompt import PromptFigure
 from src.retrieval.search import build_retriever, load_vector_store, retrieve_chunks
 
-from api.schemas import ChunkPayload, FigurePayload, RetrieveResponse
+from api.schemas import (
+    ChunkPage,
+    ChunkPayload,
+    CitationsPayload,
+    DocumentList,
+    DocumentSummaryPayload,
+    FigurePayload,
+    RetrieveResponse,
+    StoredChunk,
+)
 
 logger = get_logger(__name__)
 
 # Metadata keys that are excluded from the API payload's ``metadata`` dict to
 # keep responses small (the full content is exposed via dedicated fields).
 _EXCLUDED_META_KEYS = {"raw_text", "tables_html", "image_paths"}
+
+
+def _image_urls(chunk: Document) -> list[str]:
+    """The stable URL of each of a chunk's figures; none without a record id."""
+    if not chunk.id:
+        return []
+    return [f"/v1/images/{chunk.id}/{position}" for position in range(len(stored_image_paths(chunk.metadata or {})))]
 
 
 class StoreUnavailableError(RuntimeError):
@@ -206,6 +225,55 @@ class RAGService:
             return None
         return image_file(metadatas[0] or {}, position)
 
+    async def documents(self) -> DocumentList:
+        """List every indexed document with its chunk, figure and table counts.
+
+        Raises:
+            StoreUnavailableError: If the store cannot be loaded.
+        """
+        await self.ensure_ready()
+        summaries = await asyncio.to_thread(list_documents, self._db)
+        items = [DocumentSummaryPayload(**vars(summary)) for summary in summaries]
+        return DocumentList(items=items, total=len(items))
+
+    async def document_chunks(self, document_id: str, offset: int, limit: int) -> ChunkPage | None:
+        """Return one page of a document's chunks, in reading order.
+
+        Args:
+            document_id: The document's name, such as ``lm317``.
+            offset: Chunks to skip from the start of the document.
+            limit: Most chunks to return.
+
+        Returns:
+            The page, or None when no document has that name. An offset past
+            the end gives an empty page, not None.
+
+        Raises:
+            StoreUnavailableError: If the store cannot be loaded.
+        """
+        await self.ensure_ready()
+        chunks, total = await asyncio.to_thread(document_chunks, self._db, document_id, offset, limit)
+        if total == 0:
+            return None
+        items = []
+        for chunk in chunks:
+            tables = chunk_text_and_tables(chunk)["tables_html"]
+            image_urls = _image_urls(chunk)
+            items.append(
+                StoredChunk(
+                    record_id=chunk.id,
+                    chunk_id=chunk.metadata.get("chunk_id") or 0,
+                    source=document_id,
+                    enhanced_content=chunk.page_content,
+                    raw_text=chunk.metadata.get("raw_text") or "",
+                    tables_html=tables,
+                    image_urls=image_urls,
+                    has_table=bool(tables),
+                    has_image=bool(image_urls),
+                )
+            )
+        return ChunkPage(items=items, total=total, offset=offset, limit=limit)
+
     @staticmethod
     def to_figure_payloads(figures: list[PromptFigure]) -> list[FigurePayload]:
         """Describe the figures sent to the model by label, URL, chunk and source.
@@ -224,6 +292,22 @@ class RAGService:
             if figure.record_id
         ]
 
+    @staticmethod
+    def to_citations(answer: str, chunk_count: int, figures: list[FigurePayload]) -> CitationsPayload:
+        """Check the answer's ``[C1]`` and ``[IMG1]`` citations against the prompt.
+
+        Args:
+            answer: The finished answer text.
+            chunk_count: Chunks in the response; ``C1`` to ``C<chunk_count>`` exist.
+            figures: The figures listed in the response; only their labels
+                count as sent.
+
+        Returns:
+            The cited chunks and figures, and the cited labels that match neither.
+        """
+        found = find_citations(answer, chunk_count, [figure.label for figure in figures])
+        return CitationsPayload(chunks=found.chunks, figures=found.figures, unknown=found.unknown)
+
     def to_retrieve_response(self, query: str, chunks: list) -> RetrieveResponse:
         """Build the API response for a set of retrieved chunks.
 
@@ -239,14 +323,7 @@ class RAGService:
         for i, chunk in enumerate(chunks):
             raw = chunk_text_and_tables(chunk)
             tables = raw["tables_html"]
-            image_urls = (
-                [
-                    f"/v1/images/{chunk.id}/{position}"
-                    for position in range(len(stored_image_paths(chunk.metadata or {})))
-                ]
-                if chunk.id
-                else []
-            )
+            image_urls = _image_urls(chunk)
             metadata = {
                 k: v
                 for k, v in (chunk.metadata or {}).items()

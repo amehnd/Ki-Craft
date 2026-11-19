@@ -5,7 +5,6 @@ from config.providers import (
     PROVIDER_BY_ID,
     get_model,
     get_provider,
-    list_models_for_provider,
 )
 
 
@@ -42,10 +41,6 @@ def test_every_model_has_unique_id():
             seen.add(key)
 
 
-def test_list_models_for_provider():
-    assert len(list_models_for_provider("gemini")) > 0
-
-
 def test_openai_compatible_providers_have_an_endpoint():
     """Only OpenAI itself may rely on the client's default endpoint."""
     for provider in ALL_PROVIDERS:
@@ -61,4 +56,4 @@ def test_groq_models_that_returned_404_are_gone():
         "groq/compound",
         "groq/compound-mini",
     }
-    assert not removed & {m.id for m in list_models_for_provider("groq")}
+    assert not removed & {m.id for m in get_provider("groq").models}

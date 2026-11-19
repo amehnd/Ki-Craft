@@ -143,6 +143,9 @@ Interactive documentation is at http://127.0.0.1:8001/docs.
 | POST | `/v1/query` | Retrieves, then answers with the default model, or with the provider, model and key in an optional `llm` object |
 | POST | `/v1/query/stream` | The same, streamed token by token over Server-Sent Events |
 | GET | `/v1/images/{record_id}/{position}` | Serves one figure of a stored chunk, at a stable URL |
+| GET | `/v1/providers` | Lists the providers and models the `llm` object accepts |
+| GET | `/v1/documents` | Lists the indexed documents with their chunk, figure and table counts |
+| GET | `/v1/documents/{document_id}/chunks` | One page of a document's chunks, in reading order (`offset`, `limit`) |
 
 Retrieve chunks only:
 
@@ -186,11 +189,11 @@ API_BASE_URL=http://127.0.0.1:8001 streamlit run app/dashboard.py
 |---|---|---|
 | Home | Overview of the pages | none |
 | Query & Retrieve | Ask a question, watch the answer stream, see the chunks and figures behind it | the API |
-| Chunk Explorer | Browse every chunk: summary, raw text, tables, figures, health score | `json/*.json` |
-| Compare Chunks | Two chunks side by side | `json/*.json` |
-| Dataset Analytics | Histograms and top-20 lists per document | `json/*.json` |
+| Chunk Explorer | Browse every chunk: summary, raw text, tables, figures, health score | the API (`/v1/documents`) |
+| Compare Chunks | Two chunks side by side | the API |
+| Dataset Analytics | Histograms and top-20 lists per document | the API |
 
-The three browsing pages still read the JSON exports from disk instead of asking the API. Moving them behind the API is planned (Checkpoint 4 in [AGENTS.md](AGENTS.md)).
+Every page reads through the API, so the dashboard needs no local data files.
 
 ### On Streamlit Community Cloud
 
@@ -354,7 +357,7 @@ Every tunable lives in `config/settings.py`.
 | `CHUNK_MAX_CHARACTERS` | `3000` | Largest chunk |
 | `ENHANCEMENT_MODEL` | `zai-org/GLM-4.5V` | Vision model that writes the chunk summaries |
 
-The providers and models the `llm` object accepts are listed in `config/providers.py`.
+The providers and models the `llm` object accepts are listed in `config/providers.py`, and served by `GET /v1/providers`.
 
 ## Project structure
 
@@ -366,6 +369,7 @@ src/
   embed.py               the one embedding factory (watsonx Granite)
   llm.py                 the one chat model factory: catalogue entry -> LangChain client
   documents.py           turns stored chunk metadata back into text, tables, figures
+  browse.py              lists the stored documents and a document's chunks in order
   tables.py              stored HTML tables -> Markdown for prompts
   logger.py              logging setup
   ingestion/             offline: PDF -> elements -> chunks -> summaries -> Chroma
@@ -380,13 +384,18 @@ src/
     generate.py            retrieves, streams the answer, counts tokens, prices, traces
 api/
   main.py                FastAPI app: CORS, lifespan, routers
-  routers/               endpoints by purpose: system, retrieval, query, images
+  routers/               endpoints by purpose: system, retrieval, query, providers, documents, images
   service.py             owns the store and retriever, picks the default LLM
   schemas.py             request and response models
   openapi_examples.py    docs text and example payloads shown at /docs
   requirements.txt       the backend's packages (used by the Dockerfile)
 app/
-  dashboard.py           Streamlit UI
+  dashboard.py           Streamlit entry point: page config, styles, st.navigation
+  views/                 one module per page and URL: home, explorer, compare, analytics, chat
+  components/            pieces several pages draw: document picker, filters, model settings, chunk and answer views
+  chunk_data.py          cached API reads and helpers over chunk dicts
+  state.py               session state defaults and the loaded document
+  styles.css             the dashboard's CSS
   api_client.py          the only place the UI talks to the backend
   rag_eval_dashboard.py  Streamlit viewer for evaluation results
   requirements.txt       the dashboard's packages (used by Streamlit Community Cloud)

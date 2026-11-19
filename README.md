@@ -42,7 +42,7 @@ Phase 1 so far: a cleaned-up, explainable codebase, an API with streaming answer
 ## What it does today
 
 - **Answers from text, tables and figures.** The model gets each relevant section's original text, its tables and its figures, not just the paragraphs.
-- **Shows its evidence.** Every answer lists the figures the model saw, and cites them as `[F1]`, `[F2]`.
+- **Shows its evidence.** Every answer lists the figures the model saw, and cites them as `[IMG1]`, `[IMG2]`, next to the chunks it used (`[C1]`).
 - **Refuses to guess.** It says when the documents do not state something, keeps units and test conditions, and never mixes values from different parts.
 - **Brings your own model.** Gemini by default; any model from Gemini, OpenAI, Groq or Hugging Face with your own key.
 - **Ingests new PDFs** with a hosted vision model or one that runs locally on a Mac.
@@ -97,7 +97,7 @@ flowchart TB
     CHROMA --> MMR
     IMAGES --> REBUILD
     CHAT -- "HTTP" --> Q
-    JSON --> EXPLORE
+    EXPLORE -- "HTTP, /v1/documents" --> CHROMA
 ```
 
 </details>

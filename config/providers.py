@@ -1,9 +1,9 @@
 """Provider and model registry for LLM selection.
 
 Central place to define available providers, their models, and metadata
-(pricing and capabilities).  Used by the dashboard dropdown,
-the optional ``llm`` object of ``POST /v1/query``, and the chat model factory in
-``src/llm.py``, which only builds models listed here.
+(pricing and capabilities).  Served to clients by ``GET /v1/providers``
+(the dashboard's model picker), and checked by the chat model factory in
+``src/llm.py``, which builds only models listed here for a query's ``llm`` object.
 """
 
 from __future__ import annotations
@@ -328,8 +328,3 @@ def get_model(provider_id: str, model_id: str) -> ModelInfo | None:
         if m.id == model_id:
             return m
     return None
-
-def list_models_for_provider(provider_id: str) -> tuple[ModelInfo, ...]:
-    """Return all models for a given provider."""
-    provider = get_provider(provider_id)
-    return provider.models if provider else ()

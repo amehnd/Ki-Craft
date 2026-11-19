@@ -249,9 +249,9 @@ class UsageMetadata(BaseModel):
 
 
 class FigurePayload(BaseModel):
-    """A figure sent to the model. The answer cites it by label, as `[F1]`."""
+    """A figure sent to the model. The answer cites it by label, as `[IMG1]`."""
 
-    label: str = Field(..., description="Label in the prompt: `F1`, `F2`, ...", examples=["F1"])
+    label: str = Field(..., description="Label in the prompt: `IMG1`, `IMG2`, ...", examples=["IMG1"])
     url: str = Field(
         ...,
         description="Relative URL of the figure, `/v1/images/{record_id}/{position}`.",
@@ -259,6 +259,101 @@ class FigurePayload(BaseModel):
     )
     chunk_id: int = Field(..., description="`chunk_id` of its chunk in this response.", examples=[1])
     source: str = Field(..., description="Name of the source document.", examples=["lm317"])
+
+
+class CitationsPayload(BaseModel):
+    """What the answer cites, checked against what the prompt held.
+
+    The server reads the finished answer for `[C1]` and `[IMG1]` labels.
+    `chunks` and `figures` are citations that point at something the model
+    was given; `unknown` are labels that point at nothing, a sign the model
+    made a citation up.
+    """
+
+    chunks: list[int] = Field(
+        default_factory=list,
+        description="`chunk_id` of each cited chunk, in the order the answer first cites it.",
+        examples=[[1, 2]],
+    )
+    figures: list[str] = Field(
+        default_factory=list,
+        description="Label of each cited figure in `figures`, in the order the answer first cites it.",
+        examples=[["IMG1"]],
+    )
+    unknown: list[str] = Field(
+        default_factory=list,
+        description="Cited labels that match no chunk or sent figure, such as `IMG4` when three were sent.",
+        examples=[[]],
+    )
+
+
+class DocumentSummaryPayload(BaseModel):
+    """One indexed document and how much it holds."""
+
+    id: str = Field(..., description="The document's name, its PDF file name without `.pdf`.", examples=["lm317"])
+    chunk_count: int = Field(..., description="Stored chunks.", examples=[51])
+    image_count: int = Field(..., description="Figures across its chunks.", examples=[40])
+    table_count: int = Field(..., description="Tables across its chunks.", examples=[22])
+
+
+class DocumentList(BaseModel):
+    """Every indexed document."""
+
+    items: list[DocumentSummaryPayload] = Field(..., description="The documents, sorted by `id`.")
+    total: int = Field(..., description="Number of documents.")
+
+
+class StoredChunk(BaseModel):
+    """One stored chunk of a document, as the chunk explorer shows it."""
+
+    record_id: str = Field(..., description="Stable ID of the chunk in the store; part of its figure URLs.")
+    chunk_id: int = Field(..., description="Position of the chunk in its document, counting from 1.")
+    source: str = Field(..., description="The document's name.")
+    enhanced_content: str = Field(..., description="Summary written at ingestion; the text that is searched.")
+    raw_text: str = Field("", description="Text extracted from the PDF.")
+    tables_html: list[str] = Field(default_factory=list, description="Each table as an HTML `<table>` string.")
+    image_urls: list[str] = Field(
+        default_factory=list,
+        description="Relative URL of each figure, `/v1/images/{record_id}/{position}`.",
+    )
+    has_table: bool = Field(False, description="Whether the chunk has tables.")
+    has_image: bool = Field(False, description="Whether the chunk has figures.")
+
+
+class ChunkPage(BaseModel):
+    """One page of a document's chunks, in reading order."""
+
+    items: list[StoredChunk] = Field(..., description="The chunks on this page.")
+    total: int = Field(..., description="Chunks in the whole document.")
+    offset: int = Field(..., description="Chunks skipped before this page.")
+    limit: int = Field(..., description="Most chunks a page holds, as requested.")
+
+
+class ModelPayload(BaseModel):
+    """One model a request's `llm` object may name, with what it can do and costs."""
+
+    id: str = Field(..., description="Model id to send as `llm.model`.", examples=["gemini-3.5-flash-lite"])
+    display_name: str = Field(..., description="Name to show in a model picker.", examples=["Gemini 3.5 Flash-Lite"])
+    supports_vision: bool = Field(..., description="Whether it reads images; a text-only model is sent no figures.")
+    accepts_temperature: bool = Field(..., description="Whether `llm.temperature` reaches it; when false it is left out.")
+    default_max_tokens: int = Field(..., description="Output budget used when `llm.max_tokens` is left out.")
+    input_price_per_1m: float = Field(..., description="USD per million input tokens; 0 when unknown.")
+    output_price_per_1m: float = Field(..., description="USD per million output tokens; 0 when unknown.")
+
+
+class ProviderPayload(BaseModel):
+    """One model provider and the models it offers."""
+
+    id: str = Field(..., description="Provider id to send as `llm.provider`.", examples=["gemini"])
+    display_name: str = Field(..., description="Name to show in a provider picker.", examples=["Google Gemini"])
+    models: list[ModelPayload] = Field(..., description="Its models, in catalogue order.")
+
+
+class ProviderList(BaseModel):
+    """Every provider and model a request's `llm` object accepts."""
+
+    items: list[ProviderPayload] = Field(..., description="The providers, in catalogue order.")
+    total: int = Field(..., description="Number of providers.")
 
 
 class QueryResponse(RetrieveResponse):
@@ -269,6 +364,10 @@ class QueryResponse(RetrieveResponse):
     figures: list[FigurePayload] = Field(
         default_factory=list,
         description="Figures sent to the model, in prompt order. Empty for a text-only model.",
+    )
+    citations: CitationsPayload = Field(
+        default_factory=CitationsPayload,
+        description="The chunks and figures the answer cites, and any cited label that matches neither.",
     )
     usage: "UsageMetadata | None" = Field(None, description="Token counts and timing of the model call.")
 
@@ -281,21 +380,22 @@ class QueryResponse(RetrieveResponse):
                 "total_tables": 1,
                 "answer": (
                     "The LM317 is an adjustable linear voltage regulator with "
-                    "three pins [F1]. Pin 1 is the adjust (ADJ) pin, used to set the "
+                    "three pins [C1] [IMG1]. Pin 1 is the adjust (ADJ) pin, used to set the "
                     "output voltage with a resistor divider. Pin 2 is the "
                     "regulated output (VOUT), and pin 3 is the unregulated input "
                     "(VIN). The output voltage is approximately 1.25 V times "
-                    "(1 + R2/R1)."
+                    "(1 + R2/R1) [C2]."
                 ),
                 "answer_characters": 302,
                 "figures": [
                     {
-                        "label": "F1",
+                        "label": "IMG1",
                         "url": "/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0",
                         "chunk_id": 1,
                         "source": "lm317",
                     }
                 ],
+                "citations": {"chunks": [1, 2], "figures": ["IMG1"], "unknown": []},
                 "usage": {
                     "model": "gemini-3.5-flash-lite",
                     "input_tokens": 1024,

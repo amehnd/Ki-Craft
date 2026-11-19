@@ -6,6 +6,12 @@ rules and a user message holding every chunk (its document, summary, original
 text and tables as Markdown), each chosen figure right after its chunk, and
 the question last. Nothing here calls a model or the network; figure files
 are read from disk only when the message is built.
+
+Chunks are labelled ``C1``, ``C2``, ... and images ``IMG1``, ``IMG2``, ..., so
+the answer can cite its evidence as ``[C1]`` or ``[IMG1]``. The image labels
+deliberately avoid the word "Figure": the chunk text quotes the datasheet's
+own captions ("Figure 3. Output Voltage ..."), and a label like "Figure F3"
+next to them invites the model to mix the two numberings.
 """
 
 from __future__ import annotations
@@ -23,10 +29,10 @@ from src.tables import table_to_markdown
 
 @dataclass(frozen=True)
 class PromptFigure:
-    """One figure sent to the model, labelled ``F<n>`` in prompt order.
+    """One figure sent to the model, labelled ``IMG<n>`` in prompt order.
 
     Attributes:
-        label: ``F1``, ``F2``, ... as the prompt names it.
+        label: ``IMG1``, ``IMG2``, ... as the prompt names it.
         chunk_number: 1-based position of its chunk in the retrieved list.
         position: 0-based index into that chunk's stored figures.
         record_id: The chunk's store record id, or None if it has none.
@@ -55,16 +61,34 @@ _RULES = (
     "If the context does not contain the answer, say that the documents provided do not state it. "
     "Each chunk names its document; never combine values from different documents "
     "unless the question asks for a comparison. "
-    "Give values with their units and test conditions exactly as stated."
+    "Give values with their units and test conditions exactly as stated. "
+    "Each chunk starts with its label, like [C1]. After each statement, cite the "
+    "chunks it comes from in square brackets, like [C1] or [C1, C3]."
 )
 
 
-_FIGURE_RULE = " When you use a figure, cite its label in square brackets, like [F1]."
+_FIGURE_RULE = (
+    " Images are labelled IMG1, IMG2, and so on. These labels are not the document's own "
+    "figure numbers: a chunk's text may mention \"Figure 3\", but that is not IMG3. "
+    "When you use an image, cite its label in square brackets, like [IMG1]. If you name a "
+    "document's figure, add the image label only when that image is the figure, "
+    "like \"Figure 3 [IMG1]\"."
+)
 
 
 def _system_prompt(with_figures: bool) -> str:
     """The fixed rules; the figure rule only when figures are sent."""
     return _RULES + (_FIGURE_RULE if with_figures else "")
+
+
+def chunk_label(chunk_number: int) -> str:
+    """The prompt label of the chunk at 1-based ``chunk_number``: ``C1``, ``C2``, ..."""
+    return f"C{chunk_number}"
+
+
+def figure_label(figure_number: int) -> str:
+    """The prompt label of the 1-based ``figure_number``-th image sent: ``IMG1``, ..."""
+    return f"IMG{figure_number}"
 
 
 def _chunk_text(chunk: Document, chunk_number: int) -> str:
@@ -79,7 +103,7 @@ def _chunk_text(chunk: Document, chunk_number: int) -> str:
     content = chunk_text_and_tables(chunk)
     summary = (chunk.page_content or "").strip()
     raw_text = (content["raw_text"] or "").strip()
-    lines = [f"[Chunk {chunk_number}] Document: {source}"]
+    lines = [f"[{chunk_label(chunk_number)}] Document: {source}"]
     if summary and summary != raw_text:
         lines.append(f"Summary:\n{summary}")
     if raw_text:
@@ -102,7 +126,7 @@ def select_figures(chunks: list[Document], max_images: int) -> list[PromptFigure
         max_images: Most figures to choose; 0 chooses every readable one.
 
     Returns:
-        The chosen figures, labelled ``F1``, ``F2``, ...
+        The chosen figures, labelled ``IMG1``, ``IMG2``, ...
     """
     figures: list[PromptFigure] = []
     for chunk_number, chunk in enumerate(chunks, start=1):
@@ -113,7 +137,7 @@ def select_figures(chunks: list[Document], max_images: int) -> list[PromptFigure
             if path is None:
                 continue
             figures.append(
-                PromptFigure(f"F{len(figures) + 1}", chunk_number, position, chunk.id, source, path)
+                PromptFigure(figure_label(len(figures) + 1), chunk_number, position, chunk.id, source, path)
             )
             if len(figures) == max_images:
                 return figures
@@ -124,7 +148,10 @@ def _figure_blocks(figure: PromptFigure) -> list[dict]:
     """A figure's label, then its image read from disk as base64."""
     b64 = base64.b64encode(figure.path.read_bytes()).decode()
     return [
-        {"type": "text", "text": f"Figure {figure.label}, from {figure.source}, chunk {figure.chunk_number}"},
+        {
+            "type": "text",
+            "text": f"[{figure.label}] Image from {figure.source}, chunk {chunk_label(figure.chunk_number)}",
+        },
         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
     ]
 

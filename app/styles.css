@@ -1,0 +1,35 @@
+/* Dashboard styles, loaded once per run by app/dashboard.py.
+   The mmr-* classes are used by the home page's raw-HTML cards. */
+.block-container { padding-top: 1.5rem; padding-bottom: 1rem; }
+div[data-testid="stMetricValue"] { font-size: 1.6rem; }
+div[data-testid="stMetricLabel"] { font-size: 0.75rem; }
+div[data-testid="stDataFrame"] td, div[data-testid="stDataFrame"] th {
+    font-size: 0.8rem;
+}
+section[data-testid="stSidebar"] .block-container { padding-top: 1rem; }
+hr { margin: 0.5rem 0; }
+h1 { font-size: 1.6rem; margin-bottom: 0; }
+h2 { font-size: 1.2rem; }
+h3 { font-size: 1.0rem; }
+
+/* Home page */
+.mmr-hero {
+    border: 1px solid rgba(128,128,128,.28);
+    border-left: 4px solid #ff4b4b;
+    border-radius: 14px;
+    padding: 22px 26px;
+    background: linear-gradient(120deg,
+        rgba(255,75,75,.10), rgba(99,102,241,.10));
+}
+.mmr-hero h2 { margin: 0 0 8px 0; font-size: 1.45rem; line-height: 1.25; }
+.mmr-hero p { margin: 0; font-size: 0.95rem; line-height: 1.6; opacity: 0.85; }
+.mmr-grid {
+    display: grid; gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+.mmr-card {
+    border: 1px solid rgba(128,128,128,.22); border-radius: 12px;
+    padding: 16px 18px; background: rgba(128,128,128,.04);
+}
+.mmr-card h4 { margin: 0 0 8px 0; font-size: 1rem; line-height: 1.35; }
+.mmr-card p { margin: 0; font-size: 0.85rem; line-height: 1.6; opacity: 0.8; }

@@ -22,7 +22,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.routers import images, query, retrieval, system
+from api.routers import documents, images, providers, query, retrieval, system
 from api.service import RAGService, StoreUnavailableError
 from config.settings import CORS_ALLOWED_ORIGINS
 from src.llm import LLMProviderError
@@ -57,6 +57,8 @@ provider returns 502; an unavailable vector store returns 503.
 _TAGS = [
     {"name": "query", "description": "Retrieve chunks and generate an answer."},
     {"name": "retrieval", "description": "Retrieve chunks without generating an answer."},
+    {"name": "providers", "description": "The providers and models a query can use."},
+    {"name": "documents", "description": "Browse the indexed documents and their chunks."},
     {"name": "images", "description": "Figures of stored chunks."},
     {"name": "system", "description": "Index and health check."},
 ]
@@ -118,6 +120,8 @@ async def unexpected_error(request: Request, exc: Exception) -> JSONResponse:
 app.include_router(system.router)
 app.include_router(retrieval.router, prefix="/v1")
 app.include_router(query.router, prefix="/v1")
+app.include_router(providers.router, prefix="/v1")
+app.include_router(documents.router, prefix="/v1")
 app.include_router(images.router, prefix="/v1")
 
 

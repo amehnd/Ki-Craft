@@ -116,7 +116,7 @@ def error_responses(*codes: int) -> dict[int, dict]:
     FastAPI's default schema, which lists an ``input`` field this API strips.
     """
     descriptions = {
-        404: "No figure at that record and position.",
+        404: "Not found: no figure at that record and position, or no document with that id.",
         500: "Unexpected server error. Details are in the server log.",
         502: "The model provider failed, or returned no answer text.",
         503: "The vector store could not be loaded.",

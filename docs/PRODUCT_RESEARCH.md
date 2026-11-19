@@ -45,7 +45,7 @@ The current corpus is TLV1117, LM317, LM2596, LM555, and the AN699 application n
 ### Tier 1: makes the core Q&A trustworthy
 
 1. **Answers cited to page and region.** Every claim names the document, the page, and the table or figure, and the UI shows the cropped region. This requires keeping page numbers and bounding boxes during ingestion (see `docs/TRADEOFFS.md`, section 1). It comes in two steps:
-   - **Baseline (Checkpoints 2 and 4):** show the user the figures the model actually saw, in prompt order. Each one is labelled so the answer can cite it as `[F1]`, and cited figures come first. It is cheap, it uses data we already have, and for circuit and graph questions the figure is often the most convincing evidence.
+   - **Baseline (Checkpoints 2 and 4):** show the user the figures the model actually saw, in prompt order. Each one is labelled so the answer can cite it as `[IMG1]`, and cited figures come first. It is cheap, it uses data we already have, and for circuit and graph questions the figure is often the most convincing evidence.
    - **Full (later phase):** render the PDF page and highlight the exact passage or table cell. ChatGPT and Claude usually cite only the file, so this would set the product apart.
 2. **Spec answers with their conditions.** "Dropout voltage is 1.2 V typical, 1.3 V max, at IOUT = 800 mA, TJ = 25 °C (Table 7.5, page 5)". The prompt must require the min, typ, and max values and the test conditions whenever they exist.
 3. **"Not stated in this document"** as a first-class answer, measured in the evaluation set.

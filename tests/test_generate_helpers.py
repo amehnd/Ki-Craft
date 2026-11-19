@@ -115,9 +115,9 @@ def test_trace_inputs_keep_the_question_and_drop_objects():
 
 
 def test_generation_trace_records_figure_labels_not_bytes():
-    figures = [PromptFigure("F1", 1, 0, "id-1", "lm317", Path("dbv2/images/a.jpg"))]
+    figures = [PromptFigure("IMG1", 1, 0, "id-1", "lm317", Path("dbv2/images/a.jpg"))]
     recorded = _trace_inputs({"query": "q", "chunks": ["a"], "figures": figures})
-    assert recorded == {"question": "q", "num_chunks": 1, "figures": ["F1"]}
+    assert recorded == {"question": "q", "num_chunks": 1, "figures": ["IMG1"]}
 
 
 @pytest.fixture(autouse=True)
@@ -174,15 +174,15 @@ def test_every_retrieved_chunk_reaches_the_prompt():
     """No hidden limit: the prompt holds as many chunks as were retrieved."""
     chunks = [_chunk(f"summary {i}", []) for i in range(1, 8)]
     prompt = _text(_build_message_content(chunks, "q", []))
-    assert "[Chunk 7] Document: unknown document" in prompt and "summary 7" in prompt
-    assert "[Chunk 8]" not in prompt
+    assert "[C7] Document: unknown document" in prompt and "summary 7" in prompt
+    assert "[C8]" not in prompt
 
 
 def test_each_chunk_carries_its_document_summary_text_and_tables():
     """The original text goes to the model next to the summary, under the document's name."""
     chunk = _chunk("Summary of pins", [], source="lm317", raw_text="Pin 1 ADJ", tables=["<table>t</table>"])
     prompt = _text(_build_message_content([chunk], "pins?", []))
-    assert prompt.index("CONTEXT") < prompt.index("[Chunk 1] Document: lm317") < prompt.index("QUESTION: pins?")
+    assert prompt.index("CONTEXT") < prompt.index("[C1] Document: lm317") < prompt.index("QUESTION: pins?")
     assert "Summary:\nSummary of pins" in prompt
     assert "Text:\nPin 1 ADJ" in prompt
     assert "Table" not in prompt, "a table with no cells is skipped"
@@ -208,12 +208,12 @@ def test_figures_follow_their_own_chunk():
     order = [part["text"].split("\n")[0] if part["type"] == "text" else "image" for part in content]
     assert order == [
         "CONTEXT",
-        "[Chunk 1] Document: lm317",
-        "Figure F1, from lm317, chunk 1",
+        "[C1] Document: lm317",
+        "[IMG1] Image from lm317, chunk C1",
         "image",
-        "[Chunk 2] Document: ne555",
-        "[Chunk 3] Document: ne555",
-        "Figure F2, from ne555, chunk 3",
+        "[C2] Document: ne555",
+        "[C3] Document: ne555",
+        "[IMG2] Image from ne555, chunk C3",
         "image",
         "QUESTION: q",
     ]
@@ -229,7 +229,9 @@ def test_system_message_holds_the_rules():
     assert "using only the context provided" in rules
     assert "do not state it" in rules
     assert "never combine values from different documents" in rules
-    assert "[F1]" in rules and "[F1]" not in without[0].content
+    assert "cite the chunks it comes from" in rules and "[C1]" in without[0].content
+    assert "[IMG1]" in rules and "IMG1" not in without[0].content
+    assert "not the document's own figure numbers" in rules
 
 
 def _images(blocks: list[dict]) -> list[str]:
@@ -257,18 +259,18 @@ def test_each_figure_is_labelled_just_before_its_image():
     blocks = _image_blocks(select_figures(chunks, 0))
     assert [block["type"] for block in blocks] == ["text", "image_url"] * 3
     assert _labels(blocks) == [
-        "Figure F1, from lm317, chunk 1",
-        "Figure F2, from ne555, chunk 2",
-        "Figure F3, from ne555, chunk 2",
+        "[IMG1] Image from lm317, chunk C1",
+        "[IMG2] Image from ne555, chunk C2",
+        "[IMG3] Image from ne555, chunk C2",
     ]
 
 
 def test_unreadable_figure_takes_no_label_or_slot(_figures_root):
-    """A missing file is skipped: the next figure becomes F1 and fills the cap."""
+    """A missing file is skipped: the next figure becomes IMG1 and fills the cap."""
     chunk = _chunk("a", ["A1", "A2"])
     (_figures_root / "dbv2" / "images" / "A1.jpg").unlink()
     blocks = _image_blocks(select_figures([chunk], 1))
-    assert _labels(blocks) == ["Figure F1, from unknown document, chunk 1"]
+    assert _labels(blocks) == ["[IMG1] Image from unknown document, chunk C1"]
     assert _images(blocks) == [f"data:image/jpeg;base64,{_b64('A2')}"]
 
 
@@ -284,8 +286,8 @@ def test_selected_figures_know_their_chunk_position_and_record():
     chunks = [_chunk("a", [], record_id="r1"), _chunk("b", ["B1", "B2"], source="ne555", record_id="r2")]
     figures = select_figures(chunks, 0)
     assert [(f.label, f.chunk_number, f.position, f.record_id, f.source) for f in figures] == [
-        ("F1", 2, 0, "r2", "ne555"),
-        ("F2", 2, 1, "r2", "ne555"),
+        ("IMG1", 2, 0, "r2", "ne555"),
+        ("IMG2", 2, 1, "r2", "ne555"),
     ]
 
 
@@ -294,7 +296,7 @@ def test_skipped_figure_keeps_the_next_one_at_its_stored_position(_figures_root)
     chunk = _chunk("a", ["A1", "A2"], record_id="r1")
     (_figures_root / "dbv2" / "images" / "A1.jpg").unlink()
     (figure,) = select_figures([chunk], 0)
-    assert (figure.label, figure.position) == ("F1", 1)
+    assert (figure.label, figure.position) == ("IMG1", 1)
 
 
 def test_trace_attaches_only_the_sent_figures_by_label():
@@ -305,7 +307,7 @@ def test_trace_attaches_only_the_sent_figures_by_label():
     chunks = [_chunk("a", ["A1", "A2"])]
     run_tree = SimpleNamespace(attachments=None)
     _attach_figures_to_trace(run_tree, select_figures(chunks, 1))
-    assert run_tree.attachments == {"F1": ("image/jpeg", b"A1")}
+    assert run_tree.attachments == {"IMG1": ("image/jpeg", b"A1")}
 
 
 def test_choosing_figures_reads_no_file(monkeypatch):
@@ -316,7 +318,7 @@ def test_choosing_figures_reads_no_file(monkeypatch):
         raise AssertionError(f"select_figures read {path}")
 
     monkeypatch.setattr(Path, "read_bytes", opened)
-    assert [figure.label for figure in select_figures(chunks, 0)] == ["F1"]
+    assert [figure.label for figure in select_figures(chunks, 0)] == ["IMG1"]
 
 
 def test_figure_outside_the_images_folder_is_not_sent(_figures_root):

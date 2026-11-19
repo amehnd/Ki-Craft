@@ -29,6 +29,9 @@ supporting evidence: the exact document chunks, their tables, and their figures.
 | `/v1/query` | POST | Get evidence **and** a full answer | `QueryResponse` |
 | `/v1/query/stream` | POST | Same body as `/v1/query`, with a streamed answer | Server-Sent Events |
 | `/v1/images/{record_id}/{position}` | GET | Fetch one figure as an image (stable URL) | raw JPEG bytes |
+| `/v1/providers` | GET | The providers and models the `llm` object accepts | `ProviderList` |
+| `/v1/documents` | GET | List the indexed documents | `DocumentList` |
+| `/v1/documents/{document_id}/chunks` | GET | One page of a document's chunks, in reading order | `ChunkPage` |
 | `/docs` | GET | Swagger UI (try-it-out docs) | HTML |
 
 There are only **three shapes** you need to understand:
@@ -106,6 +109,32 @@ with the server's own key. Send it to answer with another catalogued model and
 | `temperature` | number | 0–2, default 0 | Not sent to models that reject or ignore it (Gemini 3.5 Flash-Lite and 3.6 Flash, OpenAI o-series and GPT-5.4) |
 | `max_tokens` | integer | 1–8192, optional | Output budget, reasoning included. Left out, the catalogue default applies: 2048 for models that reason by default, 512 otherwise |
 
+`GET /v1/providers` returns this catalogue, so a model picker never offers a
+model the server would reject:
+
+```json
+{
+  "items": [
+    {
+      "id": "gemini",
+      "display_name": "Google Gemini",
+      "models": [
+        {
+          "id": "gemini-3.5-flash-lite",
+          "display_name": "Gemini 3.5 Flash-Lite",
+          "supports_vision": true,
+          "accepts_temperature": false,
+          "default_max_tokens": 512,
+          "input_price_per_1m": 0.3,
+          "output_price_per_1m": 2.5
+        }
+      ]
+    }
+  ],
+  "total": 4
+}
+```
+
 `/docs` has request examples for Gemini, Groq GPT-OSS, OpenAI GPT-4o mini and
 the Hugging Face router on both query endpoints.
 
@@ -125,9 +154,12 @@ minus `answer`, `answer_characters` and `figures`):
   "answer": "The LM317 is an adjustable linear voltage regulator...",  // /v1/query only
   "answer_characters": 1086,       // /v1/query only
   "figures": [                     // /v1/query only: the figures the model saw
-    {"label": "F1", "url": "/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0",
+    {"label": "IMG1", "url": "/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0",
      "chunk_id": 1, "source": "lm317"}
   ],
+  "citations": {                   // /v1/query only: what the answer cites, checked
+    "chunks": [1, 2], "figures": ["IMG1"], "unknown": []
+  },
   "chunks": [
     {
       "chunk_id": 1,               // 1-based position within this response
@@ -164,13 +196,36 @@ minus `answer`, `answer_characters` and `figures`):
 `chunks[].image_urls` lists every figure of every retrieved chunk. `figures`
 lists only the ones sent to the model, in prompt order, capped by `max_images`
 (empty for a text-only model). The prompt labels each one, and the answer
-cites it in square brackets, so `[F1]` in `answer` means the entry whose
-`label` is `F1`. `chunk_id` points to its chunk in `chunks`, and `url` is the
+cites it in square brackets, so `[IMG1]` in `answer` means the entry whose
+`label` is `IMG1`. `chunk_id` points to its chunk in `chunks`, and `url` is the
 same URL that chunk lists in `image_urls`.
+
+The answer also cites chunks: `[C2]` means the chunk whose `chunk_id` is 2.
+The image labels are the server's own numbering, not the datasheet's: a
+datasheet's "Figure 3" is not `IMG3`. When the answer names a datasheet
+figure it adds the image label only when that image is the figure, as in
+"Figure 3 [IMG1]".
+
+### What the answer cites (`citations`)
+
+The model is asked to cite, but nothing forces it to cite correctly. After the
+answer is written the server reads it for `[C1]` and `[IMG1]` labels (several
+may share one bracket, as `[C1, IMG2]`) and checks each against what the
+prompt held:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `label` | string | `F1`, `F2`, ... as the prompt names it |
+| `chunks` | integer[] | `chunk_id` of each cited chunk, in the order the answer first cites it |
+| `figures` | string[] | `label` of each cited entry in `figures`, in first-cited order |
+| `unknown` | string[] | Cited labels that match nothing sent, such as `IMG4` when three figures were sent; show a warning |
+
+Show the cited figures first: order `figures` by their position in
+`citations.figures`, then the rest. Other bracketed text (`[1]`, a Markdown
+link) is not a citation and is ignored.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `label` | string | `IMG1`, `IMG2`, ... as the prompt names it |
 | `url` | string | Relative URL of the figure; prefix with the base URL |
 | `chunk_id` | integer | The `chunk_id` of its chunk in this response |
 | `source` | string | Source document of the figure |
@@ -192,19 +247,81 @@ once.
 
 ---
 
+### Browsing the stored documents
+
+Two read-only endpoints show what is indexed, with no search and no model call.
+
+`GET /v1/documents` lists every document:
+
+```json
+{
+  "items": [
+    {"id": "lm317", "chunk_count": 51, "image_count": 49, "table_count": 20}
+  ],
+  "total": 6
+}
+```
+
+`GET /v1/documents/{document_id}/chunks?offset=0&limit=50` returns a document's
+chunks in reading order, one page at a time:
+
+```json
+{
+  "items": [
+    {
+      "record_id": "004ca22b-a528-444e-9c0e-27c8b5858ff5",
+      "chunk_id": 1,
+      "source": "lm317",
+      "enhanced_content": "The LM317 is an adjustable ...",
+      "raw_text": "LM317 3-Terminal Adjustable Regulator ...",
+      "tables_html": [],
+      "image_urls": ["/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0"],
+      "has_table": false,
+      "has_image": true
+    }
+  ],
+  "total": 51,
+  "offset": 0,
+  "limit": 50
+}
+```
+
+| Parameter | Rules | Meaning |
+|---|---|---|
+| `document_id` | path | A document's `id`, as `/v1/documents` lists it; an unknown one is a **404** |
+| `offset` | integer, 0 or more, default 0 | Chunks to skip from the start of the document. Past the end gives an empty `items`, not an error |
+| `limit` | integer, 1 to 200, default 50 | Most chunks to return; anything else is a **422** |
+
+Here `chunk_id` is the chunk's position in its document, counting from 1. In
+query responses `chunk_id` is the chunk's position in that response instead.
+To read a whole document, request pages until you have `total` chunks:
+
+```js
+let chunks = [];
+do {
+  const r = await fetch(`${base}/v1/documents/lm317/chunks?offset=${chunks.length}&limit=200`);
+  const page = await r.json();
+  chunks = chunks.concat(page.items);
+  if (page.items.length === 0) break;
+} while (chunks.length < page.total);
+```
+
+---
+
 ## 4. Streaming the answer (`/v1/query/stream`)
 
 `POST /v1/query/stream` takes the same JSON body as `POST /v1/query`. The
 response uses **[Server-Sent Events](GLOSSARY.md#api-and-serving)**
-(`Content-Type: text/event-stream`). The server waits for the first answer
-fragment before sending the response headers.
+(`Content-Type: text/event-stream`). The chunks are sent as soon as they are
+found, before the model is called, so you can show the evidence while the
+model is still working (that can take tens of seconds).
 
 | Event | `data` payload | When |
 |---|---|---|
-| `retrieval` | a full `RetrieveResponse` (the chunks) | first, once the first answer fragment is ready |
+| `retrieval` | a full `RetrieveResponse` (the chunks) | first, as soon as retrieval finishes |
 | `token` | `{"delta": "The "}` | many times, one fragment of the answer each |
-| `done` | `{"answer": "...", "answer_characters": 1086, "num_chunks": 2, "figures": [...], "usage": {...}}` | after the last token; `figures` as in `/v1/query` |
-| `error` | `{"status": 502, "message": "..."}` | replaces `done` if the provider fails after the stream starts. Unexpected server errors carry `status: 500` |
+| `done` | `{"answer": "...", "answer_characters": 1086, "num_chunks": 2, "figures": [...], "citations": {...}, "usage": {...}}` | after the last token; `figures` and `citations` as in `/v1/query` |
+| `error` | `{"status": 502, "message": "..."}` | replaces `done` if the provider fails, before or after the first `token`. Unexpected server errors carry `status: 500` |
 
 ```bash
 curl -N http://localhost:8000/v1/query/stream \
@@ -217,9 +334,11 @@ reading `response.body`. Decode the body as text and buffer partial frames
 until the blank line that ends each event. Append each `token` event's
 `delta` to the displayed answer and use `done.answer` as the final text.
 
-Before the stream opens, a provider failure returns HTTP `502` and an
-unavailable store returns HTTP `503`. After the headers are sent the HTTP
-status stays `200`, and the `error` event carries the failure status.
+An invalid `llm` returns HTTP `422` and an unavailable store HTTP `503`,
+before the stream opens. Every model failure comes after the `retrieval`
+event, when the HTTP status is already `200`, so it arrives as an `error`
+event carrying the failure status (`502` for the provider). If you need a
+provider failure as a real HTTP `502`, use `POST /v1/query`.
 
 ---
 
@@ -311,5 +430,8 @@ can load them.
 | Evidence only (build your own answer elsewhere) | `POST /v1/retrieve` |
 | A typewriter/streaming answer effect | `POST /v1/query/stream` |
 | The figures of a response | `image_urls` → `GET /v1/images/...` |
-| The figures an answer cites (`[F1]`) | `figures` → match `label` |
+| The figures an answer cites (`[IMG1]`) | `figures` → match `label` |
+| The chunks an answer cites (`[C2]`) | `chunks` → match `chunk_id` |
+| The providers and models for a model picker | `GET /v1/providers` |
+| What is indexed, and every chunk of one document | `GET /v1/documents` → `GET /v1/documents/{id}/chunks` |
 | Just a health/probe check | `GET /health` |
