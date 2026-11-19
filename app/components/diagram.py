@@ -1,4 +1,4 @@
-"""The interactive architecture diagram on the home page.
+"""The interactive pipeline diagram on the home page.
 
 Mermaid (a JavaScript library that draws diagrams from text) renders the
 flowchart inside an iframe, with zoom, pan and a note per clicked node.
@@ -8,138 +8,69 @@ from __future__ import annotations
 
 import json
 
+# Shown when a node in the diagram is clicked.
 MERMAID_NODE_NOTES: dict[str, str] = {
-    "PDF": "The source electronic datasheet dropped into the pipeline.",
-    "PART": "<code>unstructured.partition_pdf(strategy=\"hi_res\")</code> walks the "
-    "PDF and returns typed elements instead of one flat string.",
-    "TEXT": "Narrative text, including text recovered by OCR from scanned regions.",
-    "TABLES": "Electrical-characteristics and recommended-operating tables, kept as "
-    "HTML so column headers survive.",
-    "IMAGES": "Figures, schematics, pinout diagrams and characteristic curves, kept "
-    "as base64 so they can travel with the chunk.",
-    "CHUNK": "<code>chunk_by_title</code> groups elements into semantic chunks of at "
-    "most 3000 characters.",
-    "SEP": "Splits each chunk by content type so text, tables and images can be "
-    "handled by the right model.",
-    "OCR": "Tesseract OCR reads the text printed inside images: pin labels, axis "
-    "values, curve annotations.",
-    "VLM": "<b>GLM-4.5V</b> reads the visual content and writes a summary, turning a "
-    "figure into something searchable.",
-    "ENH": "<code>enhanced_content</code>: the text-only retrieval handle for "
-    "knowledge that was originally visual.",
-    "CHROMA": "Every chunk is embedded with Granite and persisted with cosine "
-    "similarity over HNSW.",
-    "JSONF": "The same chunks exported as JSON &mdash; this is what the Chunk "
-    "Inspector and Dataset Analytics read.",
-    "EMB": "The query is embedded with the same Granite model used at ingestion.",
-    "MMR": "Maximal Marginal Relevance picks 5 chunks from a 20-chunk candidate "
-    "pool, balancing relevance against redundancy.",
-    "PROMPT": "The retrieved chunks are assembled into one multimodal context: text, "
-    "tables and the real images.",
-    "LLM": "Any configured provider and model, with a bring-your-own API key.",
-    "ANSWER": "A grounded answer that cites the chunks it was built from.",
-    "EXPLORE": "Open any chunk and inspect raw text, AI summary, images, tables and "
-    "metadata, with a 0-100 health score.",
-    "ANALYTICS": "Corpus-level distributions and top-20 lists over every chunk.",
-    "CHAT": "Ask a question, watch retrieval and the streamed answer, then read the "
-    "token, latency and cost stats.",
-    "TRACE": "LangSmith traces every embedding, retrieval, context-assembly and "
-    "generation call end to end.",
-    "EVAL": "A judge model scores retrieval and generation, surfacing failures with "
-    "a root cause.",
+    "PDF": "A datasheet or application note.",
+    "EXTRACT": "<code>unstructured.partition_pdf(strategy=\"hi_res\")</code> splits the PDF "
+    "into typed elements: text, tables (as HTML) and figures. Page headers, footers and "
+    "vendor logos are dropped.",
+    "CHUNK": "<code>chunk_by_title</code> groups elements into sections of at most 3000 "
+    "characters, so a figure stays with the text that explains it.",
+    "SUMMARY": "A vision model reads each section's text, tables and figures and writes a "
+    "plain-text summary: GLM-4.5V hosted, or Qwen3.5-4B on a Mac.",
+    "EMBED": "IBM watsonx Granite turns each summary into a 768-number vector.",
+    "STORE": "Chroma keeps the summary vector, and alongside it the original text, tables "
+    "and figure paths. Figures are JPEG files served by the API.",
+    "QUESTION": "Your question, from the Query page or any client of the API.",
+    "QEMBED": "The question is embedded with the same Granite model.",
+    "SEARCH": "MMR picks 5 sections from the 20 nearest: relevant, but not five copies of "
+    "the same paragraph.",
+    "PROMPT": "The model gets each section's original text and tables, labelled C1, C2, ..., "
+    "and up to 3 figures, labelled IMG1, IMG2, ...",
+    "MODEL": "Gemini 3.5 Flash-Lite by default, or any listed model with your own key.",
+    "ANSWER": "The answer cites [C1] and [IMG1]; the server checks every citation against "
+    "what the model was actually given.",
 }
 
 
+# The current pipeline, rendered client-side with mermaid.js inside a
+# sandboxed iframe. Keep it in step with the README's "How it works".
 MERMAID_DIAGRAM = """
-flowchart LR
-    subgraph Input["PDF Datasheet"]
-        PDF[("datasheet.pdf")]
+flowchart TB
+    subgraph IN["Ingestion, once per document"]
+        direction LR
+        PDF[("PDF")]
+        EXTRACT["Extract text,<br/>tables, figures"]
+        CHUNK["Group into<br/>sections"]
+        SUMMARY["Vision model<br/>summary"]
+        EMBED["Embed summary<br/>(watsonx Granite)"]
+        PDF --> EXTRACT --> CHUNK --> SUMMARY --> EMBED
     end
 
-    subgraph EX["1 - Extraction"]
-        direction TB
-        PART["unstructured partition_pdf<br/>strategy = hi_res"]
-        TEXT["raw_text : str"]
-        TABLES["tables_html : list[str]"]
-        IMAGES["images_base64 : list[str]"]
+    STORE[("Chroma<br/>+ figure files")]
+
+    subgraph Q["Every question"]
+        direction LR
+        QUESTION["Question"]
+        QEMBED["Embed question"]
+        SEARCH["MMR search<br/>5 of 20"]
+        PROMPT["Prompt: text, tables,<br/>figures, labelled"]
+        MODEL["Gemini or<br/>your model"]
+        ANSWER["Answer with<br/>checked citations"]
+        QUESTION --> QEMBED --> SEARCH --> PROMPT --> MODEL --> ANSWER
     end
 
-    subgraph CH["2 - Chunking"]
-        CHUNK["chunk_by_title<br/>max_chars = 3000"]
-    end
-
-    subgraph EN["3 - Enrichment"]
-        SEP["separate_content_types"]
-        OCR["Tesseract OCR<br/>text inside images"]
-        VLM["GLM-4.5V vision LLM"]
-        ENH["enhanced_content : str"]
-    end
-
-    subgraph ST["4 - Storage"]
-        CHROMA[("ChromaDB<br/>cosine similarity")]
-        JSONF[("json/*.json<br/>chunk exports")]
-    end
-
-    subgraph RE["5 - Retrieval"]
-        EMB["Granite embeddings"]
-        MMR["MMR retriever<br/>k = 10, fetch_k = 20"]
-    end
-
-    subgraph GE["6 - Generation"]
-        PROMPT["Multimodal prompt<br/>text + tables + images"]
-        LLM["Gemini / any provider<br/>BYO API key"]
-        ANSWER["Grounded answer"]
-    end
-
-    subgraph UI["7 - Apps and LLMOps"]
-        EXPLORE["Chunk Inspector"]
-        ANALYTICS["Dataset Analytics"]
-        CHAT["Query & Retrieve"]
-        TRACE["LangSmith traces"]
-        EVAL["LLM-as-a-Judge evals"]
-    end
-
-    PDF --> PART
-    PART --> TEXT
-    PART --> TABLES
-    PART --> IMAGES
-    PART --> CHUNK
-    CHUNK --> SEP
-    TEXT --> SEP
-    TABLES --> SEP
-    IMAGES --> SEP
-    SEP --> OCR
-    OCR --> VLM
-    VLM --> ENH
-    ENH --> CHROMA
-    ENH --> JSONF
-    CHROMA --> EMB
-    EMB --> MMR
-    MMR --> PROMPT
-    PROMPT --> LLM
-    LLM --> ANSWER
-    JSONF --> EXPLORE
-    JSONF --> ANALYTICS
-    CHROMA --> CHAT
-    CHAT --> ANSWER
-    MMR -. traced .-> TRACE
-    LLM -. traced .-> TRACE
-    CHAT -. traced .-> TRACE
-    ANSWER --> EVAL
-    EXPLORE --> EVAL
+    %% Linking the groups, not nodes inside them, keeps each group left to right:
+    %% Mermaid drops a group's own direction when one of its nodes links outside it.
+    IN --> STORE
+    STORE --> Q
 
     classDef ingest fill:#1a73e8,color:#fff,stroke:#0b4fa8
-    classDef chunk fill:#ea4335,color:#fff,stroke:#a8231a
-    classDef enrich fill:#fbbc04,color:#000,stroke:#a07c00
     classDef store fill:#34a853,color:#fff,stroke:#1d6b32
-    classDef retrieve fill:#673ab7,color:#fff,stroke:#3f1d80
-    classDef ui fill:#ff6d01,color:#fff,stroke:#b34d00
-    class PDF,PART,TEXT,TABLES,IMAGES ingest
-    class CHUNK chunk
-    class SEP,OCR,VLM,ENH enrich
-    class CHROMA,JSONF store
-    class EMB,MMR,PROMPT,LLM,ANSWER retrieve
-    class EXPLORE,ANALYTICS,CHAT,TRACE,EVAL ui
+    classDef query fill:#673ab7,color:#fff,stroke:#3f1d80
+    class PDF,EXTRACT,CHUNK,SUMMARY,EMBED ingest
+    class STORE store
+    class QUESTION,QEMBED,SEARCH,PROMPT,MODEL,ANSWER query
 """
 
 
@@ -175,7 +106,7 @@ _MERMAID_VIEWER = """<!DOCTYPE html>
     font-variant-numeric: tabular-nums;
   }
   #viewport {
-    position: relative; height: 660px; overflow: hidden; cursor: grab;
+    position: relative; height: 510px; overflow: hidden; cursor: grab;
     background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
   }
   #viewport.dragging { cursor: grabbing; }

@@ -1,356 +1,161 @@
-"""Home page: what the project is, how it works, and where to go next."""
+"""Home page (``/``): what KI-CRAFT does for you, and where to go next.
+
+Written as a product page for someone who reads datasheets, not as a tour of
+the code. The copy follows the README; the document list is read live from
+``GET /v1/documents``. ``app/dashboard.py`` passes in the pages this one links
+to, because a page link needs the registered page object.
+"""
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import streamlit as st
 
-from chunk_data import display_name, document_ids_or_error
+from chunk_data import display_name, list_document_summaries
 from components.diagram import MERMAID_DIAGRAM, mermaid_iframe
 
 GITHUB_URL = "https://github.com/moksh-m9u/Multimodal-Rag"
 
-
-LIVE_APP_URL = "https://multimodal-rag-complex.streamlit.app/"
-
-
-EVAL_DASHBOARD_URL = (
-    "https://multimodal-rag-iquyr6mkijuujmcr8cmikc.streamlit.app/"
-)
-
-
-PROJECT_LINKS: list[tuple[str, str]] = [
-    ("GitHub", GITHUB_URL),
-    ("Live App", LIVE_APP_URL),
-    ("Evaluation Dashboard", EVAL_DASHBOARD_URL),
-    ("API Reference", f"{GITHUB_URL}/blob/main/docs/API.md"),
-    ("LangSmith", "https://smith.langchain.com/"),
-]
-
-
-CORE_STACK: list[str] = [
-    "Python",
-    "FastAPI",
-    "Streamlit",
-    "LangChain",
-    "LangSmith",
-    "LLMOps",
-    "ChromaDB",
-    "Tesseract OCR",
-    "GLM-4.5V",
-    "Gemini",
-    "Hugging Face",
-]
-
-
-PIPELINE_STEPS: list[tuple[str, str, str, list[str]]] = [
+# (title, body) of each card in "What it does".
+_FEATURES: list[tuple[str, str]] = [
     (
-        "Step 01",
-        "Multimodal ingestion of electronic datasheets",
-        "Datasheets hide their answers inside pictures: pinout diagrams, application "
-        "circuits, characteristic curves, timing waveforms, package drawings. "
-        "<code>partition_pdf(strategy=\"hi_res\")</code> splits every datasheet into typed "
-        "elements — narrative text, structured HTML tables and base64 image blocks — while "
-        "preserving page numbers and reading order so each figure stays associated with the "
-        "section that explains it.",
-        ["PDF in", "unstructured", "hi_res strategy", "OCR"],
+        "Answers from text, tables and figures",
+        "Pinouts, curves and application circuits live in pictures. KI-CRAFT reads the "
+        "figures and tables of the relevant sections, not just the paragraphs around them.",
     ),
     (
-        "Step 02",
-        "OCR + vision-LLM enhanced representations",
-        "Tesseract OCR recovers text that physically lives inside images — pin labels, axis "
-        "values, curve annotations. Then <b>GLM-4.5V</b>, a vision language model, writes a "
-        "multimodal summary of every image- and table-rich chunk. That summary becomes "
-        "<code>enhanced_content</code>: a text-only retrieval handle for knowledge that was "
-        "originally visual, so a figure can now be found by asking about it.",
-        ["Tesseract OCR", "GLM-4.5V", "enhanced_content", "+1024 tok"],
+        "Shows its evidence",
+        "Every answer cites the sections it used, as [C1], and the figures, as [IMG1]. The "
+        "cited figures appear right above the answer, so you can check them at a glance.",
     ),
     (
-        "Step 03",
-        "Vector storage and diversity-aware retrieval",
-        "Each chunk — enhanced content, raw text, tables and images — is embedded with "
-        "Granite embeddings and persisted to <b>ChromaDB</b> using cosine similarity over HNSW. "
-        "Retrieval uses <b>MMR</b> (the top 5 from a 20-chunk candidate pool) so results "
-        "are relevant <i>and</i> diverse instead of near-duplicate paragraphs. The same "
-        "chunks are exported to JSON, which is what powers the inspector pages.",
-        ["Granite embeddings", "ChromaDB", "cosine HNSW", "MMR k=5 / fetch_k=20"],
+        "Refuses to guess",
+        "It says when the documents do not state something, keeps units and test "
+        "conditions, and never mixes values from different parts.",
     ),
     (
-        "Step 04",
-        "Chunk Inspector &amp; Dataset Analytics",
-        "A granular inspection dashboard where every chunk is opened independently: raw OCR "
-        "text, AI-generated summary, decoded images, parsed tables, full metadata and "
-        "cross-modal associations. Each chunk gets a 0–100 <b>health score</b> from content "
-        "completeness, so weak chunks can be found before they hurt a query. Dataset Analytics "
-        "adds distributions and top-20 lists over the whole corpus.",
-        ["0–100 health score", "per-chunk drill-down", "histograms", "top-20 lists"],
-    ),
-    (
-        "Step 05",
-        "Grounded multimodal query &amp; retrieve",
-        "The <b>FastAPI</b> backend runs embed → search → context assembly → generation. The "
-        "top-5 relevant chunks are passed to the generation model together with their actual "
-        "images and tables, not as flattened text, so answers can describe a pinout or read a "
-        "curve. Answers stream back over SSE, with token usage, latency and estimated cost. "
-        "Any provider and model can be selected in the sidebar with <b>Bring Your Own API Key</b>.",
-        ["Top-5 chunks", "BYO API key", "Gemini / Groq / OpenAI / HF"],
-    ),
-    (
-        "Step 06",
-        "LangSmith observability &amp; LLMOps",
-        "End-to-end tracing covers embedding, retrieval, multimodal context assembly and "
-        "generation. Every run is inspectable in LangSmith: the chunks that were retrieved, the "
-        "model calls made, inputs and outputs, latency, token usage and the full execution flow — "
-        "so a bad answer can be traced back to the exact stage that caused it.",
-        ["end-to-end traces", "latency", "token usage", "inputs / outputs"],
-    ),
-    (
-        "Step 07",
-        "LLM-as-a-Judge evaluation framework",
-        "A judge model scores both halves of the system: retrieval (relevance, coverage, "
-        "ranking, redundancy, noise) and generation (correctness, faithfulness, completeness, "
-        "conciseness, image utilisation). Across <b>13 curated datasheet questions</b> the "
-        "system reaches an <b>89.8/100</b> average overall score with a <b>92% pass rate</b>, "
-        "backed by a live evaluation dashboard with score distribution and failure analysis.",
-        ["89.8 / 100 avg", "92% pass rate", "13 cases", "failure analysis"],
+        "Brings your own model",
+        "Gemini by default. Any listed model from Gemini, OpenAI, Groq or Hugging Face "
+        "works with your own API key.",
     ),
 ]
 
+_AUDIENCE: list[tuple[str, str]] = [
+    ("KiCad users", "tired of cross-checking every pin, capacitor value and footnote against a 60-page PDF."),
+    ("Hardware engineers", "checking a design: dropout at a given load, the output voltage formula, the recommended layout."),
+    ("Students and makers", "learning to read datasheets: what a pin does, typical versus maximum, what a graph shows."),
+    ("Teams", "who want an open alternative to closed AI EDA tools, one they can run, inspect and extend."),
+]
 
-EVAL_METRICS: list[tuple[str, str, str]] = [
-    ("89.8", "Avg overall judge score", "of 100 across 13 evaluation cases"),
-    ("92%", "Pass rate", "12 of 13 cases graded Pass"),
-    ("87.0", "Avg retrieval score", "relevance, coverage, ranking, redundancy, noise"),
-    ("93.3", "Avg generation score", "correctness, faithfulness, completeness, conciseness"),
+_EXAMPLE_QUESTIONS: list[str] = [
+    "What is the LM317 reference voltage, and under which conditions?",
+    "Show me the LM2596 typical application circuit and its component values.",
+    "How does the TLV1117 dropout voltage change with output current?",
+    "What does each pin of the NE555 do?",
+]
+
+# (phase, goal, status)
+_ROADMAP: list[tuple[str, str, str]] = [
+    ("1. Datasheet assistant", "Trustworthy answers from datasheets: text, tables, figures, cited", "In progress"),
+    ("2. Schematic review", "Check a KiCad schematic against the datasheets of its parts", "Planned"),
+    ("3. Design agent", "Draft schematics in KiCad from requirements, assist with layout", "Planned"),
 ]
 
 
-def _asset(name: str) -> str:
-    return str(Path(__file__).resolve().parent.parent / "assets" / name)
+def _cards(items: list[tuple[str, str]]) -> str:
+    """Raw HTML for a grid of title-and-text cards, styled by ``styles.css``.
+
+    Fragments are joined with no blank lines: Markdown ends a raw HTML block
+    at the first blank line and would print the rest as text.
+    """
+    body = "".join(f'<div class="mmr-card"><h4>{title}</h4><p>{text}</p></div>' for title, text in items)
+    return f'<div class="mmr-grid">{body}</div>'
 
 
-def _render_hero() -> None:
-    buttons = "".join(
-        f'<a class="mmr-btn" href="{url}" target="_blank" rel="noopener">'
-        f"{label} &#8599;</a>"
-        for label, url in PROJECT_LINKS
-    )
-    badges = "".join(
-        f'<span class="mmr-badge">{tech}</span>' for tech in CORE_STACK
-    )
-
-    st.markdown(
-        f"""
-        <div class="mmr-hero">
-          <h2>Multimodal RAG AI Pipeline for Electronic Datasheets</h2>
-          <p>A production pipeline that reads datasheets the way an engineer does:
-          narrative text, tables, figures, schematics, pinout diagrams and the
-          relationships between them &mdash; then answers questions grounded in
-          the exact chunks and images that support them.</p>
-          <div class="mmr-actions">{buttons}</div>
-          <div class="mmr-badges">{badges}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def _render_problem() -> None:
-    st.markdown("## The problem with text-only RAG on datasheets")
+def _render_hero(chat_page: st.Page, explorer_page: st.Page) -> None:
+    """The headline, the one-paragraph pitch and the two main actions."""
     st.markdown(
         """
-A datasheet rarely states its most important facts in sentences. The answer
-lives in the visuals: pin assignments drawn on a package outline, absolute
-maximum ratings inside a table, gain and dropout curves, switching waveforms,
-typical application circuits. A text-only pipeline retrieves the paragraph
-*near* the figure and calls it a day, so the model confidently answers the wrong
-part &mdash; or nothing at all.
-
-This project treats every modality as first-class: extraction, enrichment,
-storage, retrieval and generation all carry text, tables **and** images together.
-"""
-    )
-
-
-def _html_grid(fragments: list[str], css_class: str) -> str:
-    """Join HTML fragments into one raw-HTML block safe for markdown.
-
-    Fragments are stripped before joining: markdown ends a raw HTML block on the
-    first blank line, and a whitespace-only line counts as blank.  Leaving the
-    indentation that trails each triple-quoted fragment in place would escape
-    every card after the first one into visible markup.
-    """
-    body = "".join(f.strip() for f in fragments)
-    return f'<div class="{css_class}">{body}</div>'
-
-
-def _render_pipeline_steps() -> None:
-    st.markdown("## What we built &mdash; step by step")
-
-    cards = []
-    for step, title, body, tags in PIPELINE_STEPS:
-        tag_html = "".join(f'<span class="mmr-tag">{t}</span>' for t in tags)
-        cards.append(
-            f"""<div class="mmr-card">
-  <div class="mmr-step">{step}</div>
-  <h4>{title}</h4>
-  <p>{body}</p>
-  <div class="mmr-tags">{tag_html}</div>
-</div>"""
-        )
-
-    st.markdown(_html_grid(cards, "mmr-grid"), unsafe_allow_html=True)
-
-
-def _render_results() -> None:
-    st.markdown("## Evaluation results")
-    st.markdown(
-        f"""
-The [LLM-as-a-Judge framework]({EVAL_DASHBOARD_URL}) grades retrieval and
-generation separately across **13 curated datasheet questions**. Headline
-numbers from the live run:
-"""
-    )
-
-    cells = []
-    for value, label, hint in EVAL_METRICS:
-        cells.append(
-            f"""<div class="mmr-metric">
-  <div class="v">{value}</div>
-  <div class="l">{label}</div>
-  <div class="h">{hint}</div>
-</div>"""
-        )
-
-    st.markdown(_html_grid(cells, "mmr-metrics"), unsafe_allow_html=True)
-    st.caption(
-        "Open the Evaluation Dashboard for the per-question score distribution, "
-        "the retrieval-vs-generation comparison and the failure analysis that "
-        "explains every non-pass case."
-    )
-
-
-def _render_architecture() -> None:
-    st.markdown("## Architecture")
-    st.markdown(
-        "End-to-end multimodal data flow &mdash; PDF in, grounded answer out, "
-        "with every stage traced."
-    )
-
-    diagram_html = mermaid_iframe(MERMAID_DIAGRAM)
-    if hasattr(st, "iframe"):
-        st.iframe(diagram_html, height=710)
-    else:  # Streamlit < 1.45, where st.iframe does not exist yet
-        import streamlit.components.v1 as components
-
-        components.html(diagram_html, height=710)
-
-    with st.expander("Mermaid source"):
-        st.code(MERMAID_DIAGRAM.strip(), language="mermaid")
-
-
-def _render_how_to_explore() -> None:
-    st.markdown("## How to explore this project")
-    st.markdown(
-        "Pick a datasheet in the **sidebar** and every page below becomes live."
-    )
-
-    steps = [
-        (
-            "Select a datasheet",
-            "Sidebar &rarr; *Select a datasheet*. The API currently holds: "
-            + ", ".join(f"**{display_name(d)}**" for d in document_ids_or_error()[0])
-            + ". The sidebar then reports total chunks and unlocks the filters.",
-        ),
-        (
-            "Chunk Explorer",
-            "Dataset-wide metrics, then filter by search text, images, tables, raw "
-            "text, enhanced content or chunk ID. Click any row to open that chunk's "
-            "health score, AI summary, raw OCR text, decoded images, parsed tables "
-            "and full metadata.",
-        ),
-        (
-            "Compare Chunks",
-            "Put any two chunks side by side &mdash; useful to see how one visual "
-            "region got summarised and how it differs from a text-only chunk.",
-        ),
-        (
-            "Dataset Analytics",
-            "Distributions of images, tables, raw length and enhanced length, plus "
-            "top-20 lists for largest chunks and most multimodal chunks.",
-        ),
-        (
-            "Query &amp; Retrieve",
-            "Ask a question and watch the backend retrieve the top-5 chunks and "
-            "stream a grounded answer. Expand any retrieved chunk to see the exact "
-            "text, tables and images the model was given, then check token usage, "
-            "latency and estimated cost. Choose any provider or model "
-            "in the sidebar &mdash; or enable <i>Use Custom Provider</i> and bring "
-            "your own API key.",
-        ),
-        (
-            "Evaluation Dashboard",
-            f"The judge results live in a [separate deployment]({EVAL_DASHBOARD_URL}): "
-            "per-question scores, retrieval vs generation breakdown, metric averages "
-            "and root-cause diagnosis for failures.",
-        ),
-    ]
-
-    st.markdown(
-        "\n\n".join(
-            f"{i}. **{title}** &mdash; {body}"
-            for i, (title, body) in enumerate(steps, 1)
-        )
-    )
-
-
-def _render_gallery() -> None:
-    shots = [
-        ("Chunk Explorer", "dashboard-chunk-explorer.png"),
-        ("Query & Retrieve", "dashboard-query.png"),
-        ("Dataset Analytics", "dashboard-analytics.png"),
-        ("Compare Chunks", "dashboard-compare.png"),
-    ]
-    available = [(label, _asset(f)) for label, f in shots if Path(_asset(f)).exists()]
-    if not available:
-        return
-
-    with st.expander("Screenshots &mdash; the app in action"):
-        for label, path in available:
-            st.image(path, caption=label, width="stretch")
-
-
-def render() -> None:
-    """Project walkthrough shown until a datasheet is selected."""
-    _render_hero()
-    st.divider()
-    _render_problem()
-    st.divider()
-    _render_pipeline_steps()
-    st.divider()
-    _render_architecture()
-    st.divider()
-    _render_results()
-    st.divider()
-    _render_how_to_explore()
-    st.divider()
-    _render_gallery()
-
-    st.markdown(
-        f"""
         <div class="mmr-hero">
-          <h2>Ready to look under the hood?</h2>
-          <p>Select a datasheet in the sidebar to inspect real chunks, or jump
-          straight to Query &amp; Retrieve to ask the pipeline a question.</p>
-          <div class="mmr-actions">
-            <a class="mmr-btn" href="{GITHUB_URL}" target="_blank" rel="noopener">Source code &#8599;</a>
-            <a class="mmr-btn" href="{EVAL_DASHBOARD_URL}" target="_blank" rel="noopener">Evaluation Dashboard &#8599;</a>
-            <a class="mmr-btn" href="{LIVE_APP_URL}" target="_blank" rel="noopener">Live App &#8599;</a>
-          </div>
+          <h2>KI-CRAFT: ask your datasheets, see the figure behind every answer</h2>
+          <p>KI-CRAFT reads datasheets and application notes the way an engineer does,
+          text, tables and figures together, and answers your questions with the exact
+          sections and figures it relied on. It is the first step of an open-source,
+          AI-assisted PCB design toolkit built to work alongside KiCad.</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
+    col1, col2, col3, _ = st.columns([1, 1, 1, 3])
+    col1.page_link(chat_page, label="Ask a datasheet")
+    col2.page_link(explorer_page, label="Browse the datasheets")
+    col3.page_link(GITHUB_URL, label="Source on GitHub")
 
 
+def _render_documents() -> None:
+    """The documents ready to query, read live from the API."""
+    st.markdown("## Ready to query")
+    try:
+        documents = list_document_summaries()
+    except Exception as exc:
+        st.warning(f"The document list is unavailable: {exc}")
+        return
+    if not documents:
+        st.info("No documents are indexed yet.")
+        return
+    columns = st.columns(len(documents))
+    for column, document in zip(columns, documents):
+        column.metric(
+            display_name(document["id"]),
+            f"{document['image_count']} figures",
+            f"{document['chunk_count']} sections, {document['table_count']} tables",
+            delta_color="off",
+            delta_arrow="off",
+            border=True,
+        )
+    st.markdown("**Try asking:**\n" + "\n".join(f"- {question}" for question in _EXAMPLE_QUESTIONS))
+
+
+def _render_how_it_works() -> None:
+    """A short explanation of the pipeline, with the interactive diagram."""
+    st.markdown("## How it works")
+    st.markdown(
+        "When a datasheet is added, a vision model writes a plain-text summary of each "
+        "section, covering its prose, tables and figures. The summaries are what gets "
+        "searched; the original text, tables and figures are stored alongside. When you "
+        "ask, the most relevant sections are found by meaning, and the model answers from "
+        "their **original** text, tables and figures, citing each one by label. The server "
+        "then checks every citation against what the model was actually given."
+    )
+    # Drawn in the open: inside a collapsed expander the iframe has no width
+    # when the diagram is laid out, and it opens zoomed onto an empty corner.
+    st.iframe(mermaid_iframe(MERMAID_DIAGRAM), height=560)
+
+
+def _render_roadmap() -> None:
+    """Where the project is going, as in the README's status table."""
+    st.markdown("## Roadmap")
+    st.table(
+        [{"Phase": phase, "Goal": goal, "Status": status} for phase, goal, status in _ROADMAP]
+    )
+
+
+def render(chat_page: st.Page, explorer_page: st.Page) -> None:
+    """Draw the home page.
+
+    Args:
+        chat_page: The Query page, for the "Ask a datasheet" link.
+        explorer_page: The Chunk Explorer page, for the "Browse" link.
+    """
+    _render_hero(chat_page, explorer_page)
+    st.markdown("## What it does")
+    st.markdown(_cards(_FEATURES), unsafe_allow_html=True)
+    st.markdown("## Who it is for")
+    st.markdown(_cards(_AUDIENCE), unsafe_allow_html=True)
+    _render_documents()
+    _render_how_it_works()
+    _render_roadmap()
+    st.caption(
+        f"KI-CRAFT is open source under the Apache 2.0 license. "
+        f"[Source]({GITHUB_URL}) · [API reference]({GITHUB_URL}/blob/main/docs/API.md) · "
+        f"[Contributing]({GITHUB_URL}/blob/main/CONTRIBUTING.md)"
+    )

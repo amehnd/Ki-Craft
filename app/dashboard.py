@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from functools import partial
 from pathlib import Path
 
 import streamlit as st
@@ -60,12 +61,22 @@ PAGE_TITLE = "KI-CRAFT"
 
 # Each page's url_path is the address it is served at, so a page can be
 # bookmarked and linked. The default page is served at "/".
+EXPLORER_PAGE = st.Page(explorer.render, title="Chunk Explorer", url_path="explorer")
+CHAT_PAGE = st.Page(chat.render, title="Query & Retrieve", url_path="chat")
+# The home page links to two other pages, and a link needs the page object,
+# so they are passed in rather than imported (which would be circular).
+HOME_PAGE = st.Page(
+    partial(home.render, chat_page=CHAT_PAGE, explorer_page=EXPLORER_PAGE),
+    title="Home",
+    url_path="home",
+    default=True,
+)
 PAGES = [
-    st.Page(home.render, title="Home", url_path="home", default=True),
-    st.Page(explorer.render, title="Chunk Explorer", url_path="explorer"),
+    HOME_PAGE,
+    EXPLORER_PAGE,
     st.Page(compare.render, title="Compare Chunks", url_path="compare"),
     st.Page(analytics.render, title="Dataset Analytics", url_path="analytics"),
-    st.Page(chat.render, title="Query & Retrieve", url_path="chat"),
+    CHAT_PAGE,
 ]
 
 

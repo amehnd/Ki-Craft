@@ -34,14 +34,19 @@ def display_name(document_id: str) -> str:
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def list_documents() -> list[str]:
-    """Ids of the indexed documents, from the API.
+def list_document_summaries() -> list[dict]:
+    """The indexed documents with their chunk, figure and table counts, from the API.
 
     Cached for a minute: Streamlit reruns the script on every click, and the
     list changes only when a document is ingested. A failure raises, and
     Streamlit never caches an exception, so the next run asks the API again.
     """
-    return [document["id"] for document in api_documents()]
+    return api_documents()
+
+
+def list_documents() -> list[str]:
+    """Ids of the indexed documents, such as ``lm317``. A failure raises."""
+    return [document["id"] for document in list_document_summaries()]
 
 
 @st.cache_data(ttl=300, show_spinner=False)
