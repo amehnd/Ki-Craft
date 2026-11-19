@@ -157,6 +157,9 @@ minus `answer`, `answer_characters` and `figures`):
     {"label": "IMG1", "url": "/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0",
      "chunk_id": 1, "source": "lm317"}
   ],
+  "citations": {                   // /v1/query only: what the answer cites, checked
+    "chunks": [1, 2], "figures": ["IMG1"], "unknown": []
+  },
   "chunks": [
     {
       "chunk_id": 1,               // 1-based position within this response
@@ -202,6 +205,23 @@ The image labels are the server's own numbering, not the datasheet's: a
 datasheet's "Figure 3" is not `IMG3`. When the answer names a datasheet
 figure it adds the image label only when that image is the figure, as in
 "Figure 3 [IMG1]".
+
+### What the answer cites (`citations`)
+
+The model is asked to cite, but nothing forces it to cite correctly. After the
+answer is written the server reads it for `[C1]` and `[IMG1]` labels (several
+may share one bracket, as `[C1, IMG2]`) and checks each against what the
+prompt held:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `chunks` | integer[] | `chunk_id` of each cited chunk, in the order the answer first cites it |
+| `figures` | string[] | `label` of each cited entry in `figures`, in first-cited order |
+| `unknown` | string[] | Cited labels that match nothing sent, such as `IMG4` when three figures were sent; show a warning |
+
+Show the cited figures first: order `figures` by their position in
+`citations.figures`, then the rest. Other bracketed text (`[1]`, a Markdown
+link) is not a citation and is ignored.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -299,7 +319,7 @@ fragment before sending the response headers.
 |---|---|---|
 | `retrieval` | a full `RetrieveResponse` (the chunks) | first, once the first answer fragment is ready |
 | `token` | `{"delta": "The "}` | many times, one fragment of the answer each |
-| `done` | `{"answer": "...", "answer_characters": 1086, "num_chunks": 2, "figures": [...], "usage": {...}}` | after the last token; `figures` as in `/v1/query` |
+| `done` | `{"answer": "...", "answer_characters": 1086, "num_chunks": 2, "figures": [...], "citations": {...}, "usage": {...}}` | after the last token; `figures` and `citations` as in `/v1/query` |
 | `error` | `{"status": 502, "message": "..."}` | replaces `done` if the provider fails after the stream starts. Unexpected server errors carry `status: 500` |
 
 ```bash

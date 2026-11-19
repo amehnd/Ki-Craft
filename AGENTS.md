@@ -98,7 +98,8 @@ src/ingestion/          offline pipeline: PDF -> elements -> chunks -> summaries
   pipeline.py             export -> records with figure files; runs the steps and writes Chroma
 src/retrieval/
   search.py               load Chroma, build the MMR retriever, retrieve
-  prompt.py               build the multimodal prompt, choose and label the figures
+  prompt.py               build the multimodal prompt, label chunks (C1) and figures (IMG1)
+  citations.py            read the finished answer's [C1] and [IMG1] citations and check them
   generate.py             retrieve, stream the answer from the model, count tokens, price, trace
 src/documents.py        turns stored chunk metadata back into text, tables, images
 src/browse.py           lists stored documents and a document's chunks in order (no search)
@@ -258,6 +259,7 @@ Each checkpoint is a set of small commits. Finish one, let the owner test and pu
 - Split `app/dashboard.py` into Streamlit pages plus shared components.
 - Show the `figures` strip under each answer, with the figures the answer cites (`[IMG1]`) shown first.
 - Prompt labels that cannot collide with the datasheet's own figure numbers. Done 2026-11-19: chunk text quotes captions such as "Figure 3. Output Voltage ...", and our label "Figure F3" sat right next to them, so the model mixed the two numberings. Rewriting "Figure N" in the chunk text to our label was measured and rejected: of 144 chunks with figures only 38 have as many captions as images, 73 have none, and many mentions point to figures in other chunks or not sent, so a find-and-replace would assert wrong mappings. Instead chunks are labelled `C1`, `C2`, ... and images `IMG1`, `IMG2`, ... (`src/retrieval/prompt.py:chunk_label`, `figure_label`); the rules ask for `[C1]` after each statement and `[IMG1]` for an image, say the image labels are not the document's figure numbers, and allow "Figure 3 [IMG1]" only when that image is the figure. The API's `figures[].label` values changed from `F1` to `IMG1`. Storing each image's real caption at ingestion (unstructured's `FigureCaption` next to `Image`) belongs to Checkpoint 7.
+- Check citations in code. Done 2026-11-19: a prompt can ask for correct citations but cannot guarantee them, so after generation `src/retrieval/citations.py:find_citations` reads the answer's bracketed labels and sorts them into cited chunks that exist, cited figures that were sent, and `unknown` labels that match nothing. `/v1/query` and the stream's `done` event carry them as `citations` (`chunks`, `figures`, `unknown`). This is deterministic; whether a valid citation is the right one (the image really shows the claim) is measured by the Checkpoint 5 evaluation.
 - Send the sidebar's Max Images in default mode too. Found 2026-11-15: without a custom provider the dashboard calls `/query/stream` with `top_k` only (`app/dashboard.py`, `api_stream(...)`), so the Max Images input is ignored and the server default `GENERATION_MAX_IMAGES` (3) applies. Only custom-provider mode sends it. Done 2026-11-16 in the POST stream migration: default mode passes `max_images` (`app/dashboard.py`, `api_stream(...)`); on 2026-11-19 the request body was captured and carries the sidebar value, 0 included.
 
 **Checkpoint 5. Evaluation baseline.**

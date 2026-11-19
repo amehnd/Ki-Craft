@@ -55,7 +55,9 @@ def _requested_llm(llm: LLMSettings | None) -> BaseChatModel | None:
         "answer written from their text, tables and up to `max_images` figures.\n\n"
         "The prompt labels chunks `C1`, `C2`, ... (the `chunk_id` in `chunks`) and "
         "images `IMG1`, `IMG2`, ...; the answer cites them in square brackets, as "
-        "`[C1]` or `[IMG1]`. `figures` lists the images sent to the model.\n\n"
+        "`[C1]` or `[IMG1]`. `figures` lists the images sent to the model, and "
+        "`citations` the chunks and figures the answer cites, checked against "
+        "the prompt: a cited label that matches neither is listed in `unknown`.\n\n"
         "Without `llm` the server's default model answers. With `llm` the given "
         "provider and model answer using your `api_key`. A provider or model "
         "not in the server's catalogue returns 422; a provider failure (bad key, "
@@ -74,7 +76,8 @@ async def query(
         HTTPException: 422 when ``llm`` names a provider or model that is
             not in the catalogue.
     """
-    answer, base, figures, usage = await request.app.state.service.answer(
+    service = request.app.state.service
+    answer, base, figures, usage = await service.answer(
         req.query,
         req.top_k,
         req.max_images,
@@ -87,6 +90,7 @@ async def query(
         answer=answer,
         answer_characters=len(answer),
         figures=figures,
+        citations=service.to_citations(answer, base.num_chunks, figures),
         usage=usage,
     )
 
@@ -115,7 +119,7 @@ def _stream_frames(
         _, figures = next(events)
         _, first_token = next(events)
         retrieval = service.to_retrieve_response(req.query, chunks)
-        figure_payloads = [figure.model_dump() for figure in service.to_figure_payloads(figures)]
+        figure_payloads = service.to_figure_payloads(figures)
         yield _sse("retrieval", retrieval.model_dump())
         yield _sse("token", {"delta": first_token})
         tokens = [first_token]
@@ -132,7 +136,10 @@ def _stream_frames(
                             "answer": answer,
                             "answer_characters": len(answer),
                             "num_chunks": retrieval.num_chunks,
-                            "figures": figure_payloads,
+                            "figures": [figure.model_dump() for figure in figure_payloads],
+                            "citations": service.to_citations(
+                                answer, retrieval.num_chunks, figure_payloads
+                            ).model_dump(),
                             "usage": value,
                         },
                     )
@@ -154,7 +161,7 @@ def _stream_frames(
         "|---|---|\n"
         "| `retrieval` | The retrieved chunks, as `POST /v1/retrieve` returns them |\n"
         "| `token` | `{\"delta\": \"...\"}`, one per answer fragment |\n"
-        "| `done` | `answer`, `answer_characters`, `num_chunks`, `figures`, `usage` |\n"
+        "| `done` | `answer`, `answer_characters`, `num_chunks`, `figures`, `citations`, `usage` |\n"
         "| `error` | `{\"status\": 502, \"message\": \"...\"}`, in place of `done` |\n\n"
         "Errors before the first fragment are ordinary HTTP errors (422, 502, 503). "
         "Errors after it end the stream with an `error` event. Swagger UI shows "

@@ -261,6 +261,32 @@ class FigurePayload(BaseModel):
     source: str = Field(..., description="Name of the source document.", examples=["lm317"])
 
 
+class CitationsPayload(BaseModel):
+    """What the answer cites, checked against what the prompt held.
+
+    The server reads the finished answer for `[C1]` and `[IMG1]` labels.
+    `chunks` and `figures` are citations that point at something the model
+    was given; `unknown` are labels that point at nothing, a sign the model
+    made a citation up.
+    """
+
+    chunks: list[int] = Field(
+        default_factory=list,
+        description="`chunk_id` of each cited chunk, in the order the answer first cites it.",
+        examples=[[1, 2]],
+    )
+    figures: list[str] = Field(
+        default_factory=list,
+        description="Label of each cited figure in `figures`, in the order the answer first cites it.",
+        examples=[["IMG1"]],
+    )
+    unknown: list[str] = Field(
+        default_factory=list,
+        description="Cited labels that match no chunk or sent figure, such as `IMG4` when three were sent.",
+        examples=[[]],
+    )
+
+
 class DocumentSummaryPayload(BaseModel):
     """One indexed document and how much it holds."""
 
@@ -339,6 +365,10 @@ class QueryResponse(RetrieveResponse):
         default_factory=list,
         description="Figures sent to the model, in prompt order. Empty for a text-only model.",
     )
+    citations: CitationsPayload = Field(
+        default_factory=CitationsPayload,
+        description="The chunks and figures the answer cites, and any cited label that matches neither.",
+    )
     usage: "UsageMetadata | None" = Field(None, description="Token counts and timing of the model call.")
 
     model_config = ConfigDict(
@@ -365,6 +395,7 @@ class QueryResponse(RetrieveResponse):
                         "source": "lm317",
                     }
                 ],
+                "citations": {"chunks": [1, 2], "figures": ["IMG1"], "unknown": []},
                 "usage": {
                     "model": "gemini-3.5-flash-lite",
                     "input_tokens": 1024,

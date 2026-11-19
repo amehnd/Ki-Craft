@@ -31,6 +31,7 @@ from src.documents import chunk_text_and_tables, image_file, stored_image_paths
 from src.embed import load_embedding_model
 from src.llm import accepts_images, default_llm
 from src.logger import get_logger
+from src.retrieval.citations import find_citations
 from src.retrieval.generate import StreamEvent, answer_query_stream
 from src.retrieval.prompt import PromptFigure
 from src.retrieval.search import build_retriever, load_vector_store, retrieve_chunks
@@ -38,6 +39,7 @@ from src.retrieval.search import build_retriever, load_vector_store, retrieve_ch
 from api.schemas import (
     ChunkPage,
     ChunkPayload,
+    CitationsPayload,
     DocumentList,
     DocumentSummaryPayload,
     FigurePayload,
@@ -289,6 +291,22 @@ class RAGService:
             for figure in figures
             if figure.record_id
         ]
+
+    @staticmethod
+    def to_citations(answer: str, chunk_count: int, figures: list[FigurePayload]) -> CitationsPayload:
+        """Check the answer's ``[C1]`` and ``[IMG1]`` citations against the prompt.
+
+        Args:
+            answer: The finished answer text.
+            chunk_count: Chunks in the response; ``C1`` to ``C<chunk_count>`` exist.
+            figures: The figures listed in the response; only their labels
+                count as sent.
+
+        Returns:
+            The cited chunks and figures, and the cited labels that match neither.
+        """
+        found = find_citations(answer, chunk_count, [figure.label for figure in figures])
+        return CitationsPayload(chunks=found.chunks, figures=found.figures, unknown=found.unknown)
 
     def to_retrieve_response(self, query: str, chunks: list) -> RetrieveResponse:
         """Build the API response for a set of retrieved chunks.

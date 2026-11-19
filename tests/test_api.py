@@ -128,6 +128,8 @@ class FakeBackend:
         self.llm_error: str | None = None
         self.llm_error_after_first_token: str | None = None
         self.finish_reason: str | None = None
+        # The second streamed token; a test sets it to put citations in the answer.
+        self.second_token = " world"
         self.prompts: list = []
         self.client_kwargs: list[dict] = []
 
@@ -169,7 +171,7 @@ class _FakeLLM:
         if self._backend.llm_error_after_first_token:
             raise RuntimeError(self._backend.llm_error_after_first_token)
         yield AIMessageChunk(
-            content=" world",
+            content=self._backend.second_token,
             usage_metadata={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
         )
 
@@ -376,6 +378,18 @@ def test_query_lists_the_figures_the_model_saw(client):
     assert body["figures"][0]["url"] == body["chunks"][1]["image_urls"][0]
 
 
+def test_query_checks_the_answer_citations(client, backend):
+    """Cited chunks and figures that exist are listed; invented labels are unknown."""
+    backend.second_token = " world [C2, IMG1] and [IMG3] [C9] [C2] [1]"
+    body = client.post("/v1/query", json={"query": "LM317 pins", "top_k": 2}).json()
+    assert body["citations"] == {"chunks": [2], "figures": ["IMG1"], "unknown": ["IMG3", "C9"]}
+
+
+def test_answer_without_citations_has_empty_citations(client):
+    body = client.post("/v1/query", json={"query": "LM317 pins", "top_k": 2}).json()
+    assert body["citations"] == {"chunks": [], "figures": [], "unknown": []}
+
+
 def test_max_images_zero_lists_every_sent_figure(client):
     body = client.post("/v1/query", json={"query": "LM317 pins", "top_k": 2, "max_images": 0}).json()
     assert [figure["label"] for figure in body["figures"]] == ["IMG1"]
@@ -448,7 +462,14 @@ def test_stream_emits_retrieval_tokens_done(client):
     assert done["figures"] == [
         {"label": "IMG1", "url": f"/v1/images/{TLV1117_ID}/0", "chunk_id": 2, "source": "tlv1117"}
     ]
+    assert done["citations"] == {"chunks": [], "figures": [], "unknown": []}
     assert "response_id" not in done and "response_id" not in events[0][1]
+
+
+def test_stream_done_event_checks_citations(client, backend):
+    backend.second_token = " [C1] [IMG1] [IMG2]"
+    events = _parse_sse(client.post("/v1/query/stream", json={"query": "LM317 pins", "top_k": 2}).text)
+    assert events[-1][1]["citations"] == {"chunks": [1], "figures": ["IMG1"], "unknown": ["IMG2"]}
 
 
 def test_stream_reports_llm_failure_as_error_event(client, backend):
