@@ -53,8 +53,9 @@ def _requested_llm(llm: LLMSettings | None) -> BaseChatModel | None:
     description=(
         "Retrieves the `top_k` most relevant chunks and returns them with an "
         "answer written from their text, tables and up to `max_images` figures.\n\n"
-        "`figures` lists the figures sent to the model, labelled `F1`, `F2`, ...; "
-        "the answer cites them in square brackets, as `[F1]`.\n\n"
+        "The prompt labels chunks `C1`, `C2`, ... (the `chunk_id` in `chunks`) and "
+        "images `IMG1`, `IMG2`, ...; the answer cites them in square brackets, as "
+        "`[C1]` or `[IMG1]`. `figures` lists the images sent to the model.\n\n"
         "Without `llm` the server's default model answers. With `llm` the given "
         "provider and model answer using your `api_key`. A provider or model "
         "not in the server's catalogue returns 422; a provider failure (bad key, "

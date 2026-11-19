@@ -249,9 +249,9 @@ class UsageMetadata(BaseModel):
 
 
 class FigurePayload(BaseModel):
-    """A figure sent to the model. The answer cites it by label, as `[F1]`."""
+    """A figure sent to the model. The answer cites it by label, as `[IMG1]`."""
 
-    label: str = Field(..., description="Label in the prompt: `F1`, `F2`, ...", examples=["F1"])
+    label: str = Field(..., description="Label in the prompt: `IMG1`, `IMG2`, ...", examples=["IMG1"])
     url: str = Field(
         ...,
         description="Relative URL of the figure, `/v1/images/{record_id}/{position}`.",
@@ -350,16 +350,16 @@ class QueryResponse(RetrieveResponse):
                 "total_tables": 1,
                 "answer": (
                     "The LM317 is an adjustable linear voltage regulator with "
-                    "three pins [F1]. Pin 1 is the adjust (ADJ) pin, used to set the "
+                    "three pins [C1] [IMG1]. Pin 1 is the adjust (ADJ) pin, used to set the "
                     "output voltage with a resistor divider. Pin 2 is the "
                     "regulated output (VOUT), and pin 3 is the unregulated input "
                     "(VIN). The output voltage is approximately 1.25 V times "
-                    "(1 + R2/R1)."
+                    "(1 + R2/R1) [C2]."
                 ),
                 "answer_characters": 302,
                 "figures": [
                     {
-                        "label": "F1",
+                        "label": "IMG1",
                         "url": "/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0",
                         "chunk_id": 1,
                         "source": "lm317",

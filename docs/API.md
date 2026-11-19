@@ -154,7 +154,7 @@ minus `answer`, `answer_characters` and `figures`):
   "answer": "The LM317 is an adjustable linear voltage regulator...",  // /v1/query only
   "answer_characters": 1086,       // /v1/query only
   "figures": [                     // /v1/query only: the figures the model saw
-    {"label": "F1", "url": "/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0",
+    {"label": "IMG1", "url": "/v1/images/004ca22b-a528-444e-9c0e-27c8b5858ff5/0",
      "chunk_id": 1, "source": "lm317"}
   ],
   "chunks": [
@@ -193,13 +193,19 @@ minus `answer`, `answer_characters` and `figures`):
 `chunks[].image_urls` lists every figure of every retrieved chunk. `figures`
 lists only the ones sent to the model, in prompt order, capped by `max_images`
 (empty for a text-only model). The prompt labels each one, and the answer
-cites it in square brackets, so `[F1]` in `answer` means the entry whose
-`label` is `F1`. `chunk_id` points to its chunk in `chunks`, and `url` is the
+cites it in square brackets, so `[IMG1]` in `answer` means the entry whose
+`label` is `IMG1`. `chunk_id` points to its chunk in `chunks`, and `url` is the
 same URL that chunk lists in `image_urls`.
+
+The answer also cites chunks: `[C2]` means the chunk whose `chunk_id` is 2.
+The image labels are the server's own numbering, not the datasheet's: a
+datasheet's "Figure 3" is not `IMG3`. When the answer names a datasheet
+figure it adds the image label only when that image is the figure, as in
+"Figure 3 [IMG1]".
 
 | Field | Type | Meaning |
 |---|---|---|
-| `label` | string | `F1`, `F2`, ... as the prompt names it |
+| `label` | string | `IMG1`, `IMG2`, ... as the prompt names it |
 | `url` | string | Relative URL of the figure; prefix with the base URL |
 | `chunk_id` | integer | The `chunk_id` of its chunk in this response |
 | `source` | string | Source document of the figure |
@@ -401,7 +407,8 @@ can load them.
 | Evidence only (build your own answer elsewhere) | `POST /v1/retrieve` |
 | A typewriter/streaming answer effect | `POST /v1/query/stream` |
 | The figures of a response | `image_urls` → `GET /v1/images/...` |
-| The figures an answer cites (`[F1]`) | `figures` → match `label` |
+| The figures an answer cites (`[IMG1]`) | `figures` → match `label` |
+| The chunks an answer cites (`[C2]`) | `chunks` → match `chunk_id` |
 | The providers and models for a model picker | `GET /v1/providers` |
 | What is indexed, and every chunk of one document | `GET /v1/documents` → `GET /v1/documents/{id}/chunks` |
 | Just a health/probe check | `GET /health` |

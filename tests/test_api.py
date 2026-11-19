@@ -362,8 +362,8 @@ def test_query_returns_answer_and_usage(client, backend):
     assert "using only the context provided" in system.content
     content = user.content
     assert content[-1] == {"type": "text", "text": "QUESTION: LM317 pins"}
-    assert content[2]["text"].startswith("[Chunk 2] Document: tlv1117")
-    assert content[3] == {"type": "text", "text": "Figure F1, from tlv1117, chunk 2"}
+    assert content[2]["text"].startswith("[C2] Document: tlv1117")
+    assert content[3] == {"type": "text", "text": "[IMG1] Image from tlv1117, chunk C2"}
     assert content[4]["type"] == "image_url"
 
 
@@ -371,14 +371,14 @@ def test_query_lists_the_figures_the_model_saw(client):
     """Each prompt figure comes back with its label, URL, chunk and document."""
     body = client.post("/v1/query", json={"query": "LM317 pins", "top_k": 2}).json()
     assert body["figures"] == [
-        {"label": "F1", "url": f"/v1/images/{TLV1117_ID}/0", "chunk_id": 2, "source": "tlv1117"}
+        {"label": "IMG1", "url": f"/v1/images/{TLV1117_ID}/0", "chunk_id": 2, "source": "tlv1117"}
     ]
     assert body["figures"][0]["url"] == body["chunks"][1]["image_urls"][0]
 
 
 def test_max_images_zero_lists_every_sent_figure(client):
     body = client.post("/v1/query", json={"query": "LM317 pins", "top_k": 2, "max_images": 0}).json()
-    assert [figure["label"] for figure in body["figures"]] == ["F1"]
+    assert [figure["label"] for figure in body["figures"]] == ["IMG1"]
 
 
 def test_query_defaults_come_from_settings(client, backend):
@@ -391,7 +391,7 @@ def test_query_defaults_come_from_settings(client, backend):
     assert body["usage"]["prompt_images"] <= GENERATION_MAX_IMAGES
 
     prompt = "\n".join(part["text"] for part in backend.prompts[0][1].content if part["type"] == "text")
-    assert "[Chunk 2] Document:" in prompt
+    assert "[C2] Document:" in prompt
 
 
 def test_query_llm_failure_is_502(client, backend):
@@ -446,7 +446,7 @@ def test_stream_emits_retrieval_tokens_done(client):
     assert done["answer"] == "Hello world"
     assert done["num_chunks"] == 2
     assert done["figures"] == [
-        {"label": "F1", "url": f"/v1/images/{TLV1117_ID}/0", "chunk_id": 2, "source": "tlv1117"}
+        {"label": "IMG1", "url": f"/v1/images/{TLV1117_ID}/0", "chunk_id": 2, "source": "tlv1117"}
     ]
     assert "response_id" not in done and "response_id" not in events[0][1]
 
