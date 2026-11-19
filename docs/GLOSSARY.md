@@ -10,7 +10,11 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **Vector space.** The set of positions one embedding model puts texts in. Only vectors from the same model share a space, so distances between vectors from different models mean nothing, even when both have 768 numbers. A query must be embedded by the model that built the store; that is why the local backend uses the open weights of the same Granite model. Here: `src/embed.py`.
 
-**Normalization.** Scaling an embedding so its length is 1. After that, cosine similarity and the dot product give the same ranking. The stored vectors already have length 1, and the local embedding backend produces unit-length vectors too (`encode_kwargs`, `src/embed.py`).
+**Normalization.** Scaling an embedding so its length is 1. After that, cosine similarity and the dot product give the same ranking. The stored vectors already have length 1, and the local embedding backend produces unit-length vectors too (`normalize=True`, `src/embed.py`).
+
+**GGUF.** A single-file format for model weights, read by llama.cpp, a C++ runtime that runs models on a CPU without torch. Here: the local embedding backend loads a GGUF build of the Granite embedder (`src/embed.py`).
+
+**Quantization.** Storing model weights with fewer bits (for example 8 or 4 instead of 16) to make the file and its memory smaller, at the cost of slightly different outputs. Q8_0 keeps 8 bits per weight; Q4_K_M about 4.5. Here: Q8_0 matches the stored vectors at cosine 0.9999, Q4_K_M at 0.991 or better.
 
 **Vector store.** A database that stores embeddings and finds the nearest ones to a query embedding. Here: Chroma today, Postgres with pgvector after Checkpoint 6.
 
