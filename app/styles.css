@@ -1,0 +1,73 @@
+/* Dashboard styles, loaded once per run by app/dashboard.py.
+   The mmr-* classes are used by the home page's raw-HTML cards. */
+.block-container { padding-top: 1.5rem; padding-bottom: 1rem; }
+div[data-testid="stMetricValue"] { font-size: 1.6rem; }
+div[data-testid="stMetricLabel"] { font-size: 0.75rem; }
+div[data-testid="stDataFrame"] td, div[data-testid="stDataFrame"] th {
+    font-size: 0.8rem;
+}
+section[data-testid="stSidebar"] .block-container { padding-top: 1rem; }
+hr { margin: 0.5rem 0; }
+h1 { font-size: 1.6rem; margin-bottom: 0; }
+h2 { font-size: 1.2rem; }
+h3 { font-size: 1.0rem; }
+
+/* Home page */
+.mmr-hero {
+    border: 1px solid rgba(128,128,128,.28);
+    border-left: 4px solid #ff4b4b;
+    border-radius: 14px;
+    padding: 22px 26px;
+    background: linear-gradient(120deg,
+        rgba(255,75,75,.10), rgba(99,102,241,.10));
+}
+.mmr-hero h2 { margin: 0 0 8px 0; font-size: 1.45rem; line-height: 1.25; }
+.mmr-hero p { margin: 0; font-size: 0.95rem; line-height: 1.6; opacity: 0.85; }
+.mmr-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.mmr-btn {
+    display: inline-block; padding: 7px 14px; border-radius: 999px;
+    font-size: 0.82rem; font-weight: 600; text-decoration: none;
+    border: 1px solid rgba(128,128,128,.38); color: inherit;
+    transition: border-color .15s, color .15s;
+}
+.mmr-btn:hover { border-color: #ff4b4b; color: #ff4b4b; }
+.mmr-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+.mmr-badge {
+    font-size: 0.72rem; padding: 3px 10px; border-radius: 6px;
+    background: rgba(128,128,128,.14);
+    border: 1px solid rgba(128,128,128,.22); color: inherit;
+}
+.mmr-grid {
+    display: grid; gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+.mmr-card {
+    border: 1px solid rgba(128,128,128,.22); border-radius: 12px;
+    padding: 16px 18px; background: rgba(128,128,128,.04);
+}
+.mmr-step {
+    font-size: 0.68rem; font-weight: 700; letter-spacing: 0.09em;
+    text-transform: uppercase; color: #ff4b4b;
+}
+.mmr-card h4 { margin: 5px 0 8px 0; font-size: 1rem; line-height: 1.35; }
+.mmr-card p { margin: 0; font-size: 0.85rem; line-height: 1.6; opacity: 0.8; }
+.mmr-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; }
+.mmr-tag {
+    font-size: 0.68rem; padding: 2px 8px; border-radius: 5px;
+    background: rgba(128,128,128,.12);
+    border: 1px solid rgba(128,128,128,.18); color: inherit; opacity: 0.9;
+}
+.mmr-metrics {
+    display: grid; gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+.mmr-metric {
+    text-align: center; padding: 16px 12px; border-radius: 12px;
+    border: 1px solid rgba(128,128,128,.22); background: rgba(128,128,128,.04);
+}
+.mmr-metric .v { font-size: 1.6rem; font-weight: 700; line-height: 1.1; }
+.mmr-metric .l {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em;
+    margin-top: 6px; opacity: 0.75;
+}
+.mmr-metric .h { font-size: 0.7rem; margin-top: 6px; opacity: 0.6; }

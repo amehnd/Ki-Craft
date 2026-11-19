@@ -390,7 +390,12 @@ api/
   openapi_examples.py    docs text and example payloads shown at /docs
   requirements.txt       the backend's packages (used by the Dockerfile)
 app/
-  dashboard.py           Streamlit UI
+  dashboard.py           Streamlit entry point: page config, styles, st.navigation
+  views/                 one module per page and URL: home, explorer, compare, analytics, chat
+  components/            pieces several pages draw: document picker, filters, model settings, chunk and answer views
+  chunk_data.py          cached API reads and helpers over chunk dicts
+  state.py               session state defaults and the loaded document
+  styles.css             the dashboard's CSS
   api_client.py          the only place the UI talks to the backend
   rag_eval_dashboard.py  Streamlit viewer for evaluation results
   requirements.txt       the dashboard's packages (used by Streamlit Community Cloud)
