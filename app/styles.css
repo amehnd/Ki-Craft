@@ -1,5 +1,5 @@
 /* Dashboard styles, loaded once per run by app/dashboard.py.
-   The mmr-* classes are used by the home page's raw-HTML cards. */
+   The kc-* classes are used by the home page's raw HTML. */
 .block-container { padding-top: 1.5rem; padding-bottom: 1rem; }
 div[data-testid="stMetricValue"] { font-size: 1.6rem; }
 div[data-testid="stMetricLabel"] { font-size: 0.75rem; }
@@ -13,23 +13,45 @@ h2 { font-size: 1.2rem; }
 h3 { font-size: 1.0rem; }
 
 /* Home page */
-.mmr-hero {
-    border: 1px solid rgba(128,128,128,.28);
-    border-left: 4px solid #ff4b4b;
-    border-radius: 14px;
-    padding: 22px 26px;
-    background: linear-gradient(120deg,
-        rgba(255,75,75,.10), rgba(99,102,241,.10));
+.kc-hero {
+    border: 1px solid rgba(128,128,128,.25);
+    border-radius: 16px;
+    padding: 28px 30px 24px 30px;
+    margin-bottom: 14px;
+    background:
+        radial-gradient(circle at 100% 0%, rgba(99,102,241,.18), transparent 55%),
+        linear-gradient(135deg, rgba(255,75,75,.10), rgba(128,128,128,.03));
 }
-.mmr-hero h2 { margin: 0 0 8px 0; font-size: 1.45rem; line-height: 1.25; }
-.mmr-hero p { margin: 0; font-size: 0.95rem; line-height: 1.6; opacity: 0.85; }
-.mmr-grid {
-    display: grid; gap: 12px;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+.kc-eyebrow {
+    font-size: 0.72rem; font-weight: 600; letter-spacing: .12em;
+    text-transform: uppercase; opacity: .65; margin-bottom: 6px;
 }
-.mmr-card {
+.kc-title {
+    font-size: 2.6rem; font-weight: 800; letter-spacing: .02em; line-height: 1.1;
+    background: linear-gradient(90deg, #ff4b4b, #7c6cf0);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.kc-tagline { font-size: 1.15rem; font-weight: 600; margin: 8px 0 10px 0; line-height: 1.4; }
+.kc-lede { margin: 0; max-width: 46rem; font-size: 0.95rem; line-height: 1.6; opacity: .82; }
+.kc-grid {
+    display: grid; gap: 12px; margin-bottom: 8px;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+.kc-card {
     border: 1px solid rgba(128,128,128,.22); border-radius: 12px;
     padding: 16px 18px; background: rgba(128,128,128,.04);
 }
-.mmr-card h4 { margin: 0 0 8px 0; font-size: 1rem; line-height: 1.35; }
-.mmr-card p { margin: 0; font-size: 0.85rem; line-height: 1.6; opacity: 0.8; }
+.kc-card h4 { margin: 0 0 8px 0; padding: 0; font-size: 1rem; line-height: 1.35; }
+.kc-card p { margin: 0; font-size: 0.86rem; line-height: 1.6; opacity: .82; }
+.kc-steps { margin: 0; padding-left: 1.2rem; font-size: 0.86rem; line-height: 1.55; }
+.kc-steps li { margin-bottom: 6px; opacity: .88; }
+.kc-step-name { font-weight: 700; margin-right: 6px; }
+.kc-step-name::after { content: ":"; }
+.kc-parts { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.kc-part {
+    display: flex; flex-direction: column; gap: 2px;
+    border: 1px solid rgba(128,128,128,.25); border-radius: 10px;
+    padding: 10px 14px; min-width: 180px; flex: 1 1 200px;
+}
+.kc-part b { font-size: 1rem; }
+.kc-part span { font-size: 0.78rem; opacity: .72; line-height: 1.4; }

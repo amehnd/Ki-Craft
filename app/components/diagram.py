@@ -27,9 +27,10 @@ MERMAID_NODE_NOTES: dict[str, str] = {
     "the same paragraph.",
     "PROMPT": "The model gets each section's original text and tables, labelled C1, C2, ..., "
     "and up to 3 figures, labelled IMG1, IMG2, ...",
-    "MODEL": "Gemini 3.5 Flash-Lite by default, or any listed model with your own key.",
-    "ANSWER": "The answer cites [C1] and [IMG1]; the server checks every citation against "
-    "what the model was actually given.",
+    "MODEL": "Gemini 3.5 Flash-Lite by default, or any listed model with your own key. "
+    "The answer streams to the page and cites [C1] and [IMG1].",
+    "CHECK": "The server reads every bracketed label in the answer and keeps those the "
+    "model was given; any other label is reported as unknown.",
 }
 
 
@@ -37,27 +38,27 @@ MERMAID_NODE_NOTES: dict[str, str] = {
 # sandboxed iframe. Keep it in step with the README's "How it works".
 MERMAID_DIAGRAM = """
 flowchart TB
-    subgraph IN["Ingestion, once per document"]
+    subgraph IN["Once per datasheet"]
         direction LR
         PDF[("PDF")]
-        EXTRACT["Extract text,<br/>tables, figures"]
-        CHUNK["Group into<br/>sections"]
-        SUMMARY["Vision model<br/>summary"]
-        EMBED["Embed summary<br/>(watsonx Granite)"]
+        EXTRACT["unstructured hi_res:<br/>text, tables, figures"]
+        CHUNK["Sections by heading<br/>max 3,000 chars"]
+        SUMMARY["Vision model<br/>summary per section"]
+        EMBED["watsonx Granite<br/>768-number vector"]
         PDF --> EXTRACT --> CHUNK --> SUMMARY --> EMBED
     end
 
-    STORE[("Chroma<br/>+ figure files")]
+    STORE[("Chroma: vectors, original text,<br/>tables, figure files")]
 
-    subgraph Q["Every question"]
+    subgraph Q["For every question"]
         direction LR
         QUESTION["Question"]
-        QEMBED["Embed question"]
-        SEARCH["MMR search<br/>5 of 20"]
-        PROMPT["Prompt: text, tables,<br/>figures, labelled"]
-        MODEL["Gemini or<br/>your model"]
-        ANSWER["Answer with<br/>checked citations"]
-        QUESTION --> QEMBED --> SEARCH --> PROMPT --> MODEL --> ANSWER
+        QEMBED["Embed question<br/>(same Granite)"]
+        SEARCH["MMR: 20 nearest,<br/>keep 5"]
+        PROMPT["Prompt: C1-C5 text + tables,<br/>IMG1-IMG3 figures"]
+        MODEL["Gemini 3.5 Flash-Lite<br/>or your model"]
+        CHECK["Check citations<br/>against what was sent"]
+        QUESTION --> QEMBED --> SEARCH --> PROMPT --> MODEL --> CHECK
     end
 
     %% Linking the groups, not nodes inside them, keeps each group left to right:
@@ -70,7 +71,7 @@ flowchart TB
     classDef query fill:#673ab7,color:#fff,stroke:#3f1d80
     class PDF,EXTRACT,CHUNK,SUMMARY,EMBED ingest
     class STORE store
-    class QUESTION,QEMBED,SEARCH,PROMPT,MODEL,ANSWER query
+    class QUESTION,QEMBED,SEARCH,PROMPT,MODEL,CHECK query
 """
 
 

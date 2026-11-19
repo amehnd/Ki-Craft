@@ -33,6 +33,7 @@ from components.answer_view import (
     render_unknown_citations,
     render_usage,
 )
+from components.example_questions import ask_example, render_example_buttons
 from components.model_settings import render_model_settings
 
 
@@ -194,8 +195,8 @@ def render() -> None:
     render_model_settings()
     st.header("Query & Retrieve")
     st.caption(
-        "Ask about the indexed datasheets. The retrieved chunks appear first, then the "
-        "answer as the model writes it, with the figures it cites right above it."
+        "Ask about the indexed datasheets, or pick an example. The retrieved chunks appear "
+        "first, then the answer as the model writes it, with the figures it cites right above it."
     )
     problem = _backend_problem()
     if problem:
@@ -204,15 +205,26 @@ def render() -> None:
             "want, e.g. `API_BASE_URL=http://127.0.0.1:8001 streamlit run app/dashboard.py`."
         )
 
+    has_result = bool(st.session_state.chat_retrieval or st.session_state.chat_error)
+    # Drawn above the question box, so a clicked example can still fill it this run.
+    with st.expander("Try asking", expanded=not has_result):
+        clicked = render_example_buttons("chat")
+    if clicked:
+        ask_example(clicked)
+
     question = st.text_area("Question", key="chat_query", placeholder="Ask a question about your documents ...")
     col1, col2, _ = st.columns([1, 1, 4])
     submitted = col1.button("Ask", type="primary", width="stretch")
     col2.button("Clear", width="stretch", on_click=_clear)
+    # Set by an example question, here or on the home page: ask it without a second click.
+    if st.session_state.chat_ask_now:
+        st.session_state.chat_ask_now = False
+        submitted = True
 
     slots = _make_slots()
     if submitted and question.strip():
         _ask(question.strip(), slots)
-    elif st.session_state.chat_retrieval or st.session_state.chat_error:
+    elif has_result:
         _draw_saved(slots)
     else:
         slots.progress.info("Enter a question and press Ask.")

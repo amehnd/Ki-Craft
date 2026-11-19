@@ -35,6 +35,7 @@ _DEFAULTS: dict = {
     "llm_top_k": 5,
     "use_custom_provider": False,
     "chat_query": "",
+    "chat_ask_now": False,
     "chat_retrieval": None,
     "chat_answer": None,
     "chat_done": None,
