@@ -7,6 +7,8 @@ reads and writes the keys set up here.
 
 from __future__ import annotations
 
+import copy
+
 import streamlit as st
 
 from chunk_data import fetch_document_chunks
@@ -33,11 +35,11 @@ _DEFAULTS: dict = {
     "llm_top_k": 5,
     "use_custom_provider": False,
     "chat_query": "",
-    "chat_answer": None,
     "chat_retrieval": None,
-    "chat_usage": None,
-    "chat_figures": [],
-    "chat_citations": {},
+    "chat_answer": None,
+    "chat_done": None,
+    "chat_error": None,
+    "chat_session_usage": {"answers": 0, "input_tokens": 0, "output_tokens": 0, "cost": 0.0},
 }
 
 # Sidebar widgets drawn on only some pages. Streamlit deletes a widget's value
@@ -62,6 +64,7 @@ _KEPT_WIDGETS: tuple[str, ...] = (
     "llm_max_images",
     "llm_top_k",
     "use_custom_provider",
+    "chat_query",
 )
 
 
@@ -69,7 +72,9 @@ def init_state() -> None:
     """Set every missing session key to its default; existing values are left alone."""
     for key, value in _DEFAULTS.items():
         if key not in st.session_state:
-            st.session_state[key] = value
+            # A copy: the defaults are shared by every browser tab on this
+            # server, and the session usage totals are changed in place.
+            st.session_state[key] = copy.deepcopy(value)
 
 
 def keep_widget_values() -> None:

@@ -208,56 +208,48 @@ def render_chunk_card(chunk: dict) -> None:
         st.json(chunk_fields(chunk))
 
 
-def render_chunk_payload(payload: dict, index: int) -> None:
-    """Render one retrieved chunk from an API ``ChunkPayload`` dict."""
+def render_retrieved_chunk(payload: dict, cited: bool) -> None:
+    """Draw one retrieved chunk as a collapsed panel with its content in tabs.
+
+    Nothing here is a widget (no text area, no keys), so the same chunk can
+    be drawn twice in one run: once when retrieval arrives, again with its
+    citation mark when the answer is done.
+
+    Args:
+        payload: One entry of the API's ``chunks`` list.
+        cited: Whether the answer cites this chunk.
+    """
     raw_text = payload.get("raw_text", "")
     tables = payload.get("tables_html", [])
     image_urls = payload.get("image_urls", [])
     enhanced = payload.get("enhanced_content", "")
 
-    label = (
-        f"Chunk {index + 1}  —  "
-        f"Images: {len(image_urls)}  |  "
-        f"Tables: {len(tables)}  |  "
-        f"Raw: {len(raw_text)} chars  |  "
-        f"Enhanced: {len(enhanced)} chars"
-    )
+    parts = [f"C{payload.get('chunk_id')}", payload.get("source") or "unknown document"]
+    parts.append(f"{len(image_urls)} figure{'s' if len(image_urls) != 1 else ''}")
+    parts.append(f"{len(tables)} table{'s' if len(tables) != 1 else ''}")
+    label = " · ".join(parts) + ("  :green[cited]" if cited else "")
 
-    with st.expander(label, expanded=index == 0):
-        tab_e, tab_r, tab_i, tab_t = st.tabs(["Enhanced", "Raw Text", "Images", "Tables"])
-
+    with st.expander(label):
+        tab_e, tab_r, tab_i, tab_t = st.tabs(["Summary", "Original text", "Figures", "Tables"])
         with tab_e:
             st.markdown(enhanced)
-
         with tab_r:
-            st.metric("Words", len(raw_text.split()))
-            st.text_area(
-                "raw",
-                value=raw_text,
-                height=250,
-                disabled=True,
-                label_visibility="collapsed",
-                key=f"api_raw_{index}",
-            )
-
+            st.caption(f"{len(raw_text.split())} words")
+            with st.container(height=250):
+                st.text(raw_text)
         with tab_i:
             if not image_urls:
-                st.info("No images in this chunk.")
-            else:
-                for j, url in enumerate(image_urls):
-                    st.image(url, width=400, caption=f"Image {j + 1}")
-
+                st.info("No figures in this chunk.")
+            for j, url in enumerate(image_urls):
+                st.image(url, width=400, caption=f"Figure {j + 1} of this chunk")
         with tab_t:
             if not tables:
                 st.info("No tables in this chunk.")
-            else:
-                for j, html in enumerate(tables):
-                    st.markdown(f"**Table {j + 1}**")
-                    df = parse_table_html(html)
-                    if df is not None:
-                        st.dataframe(df, width="stretch")
-                    else:
-                        st.warning("Could not parse table.")
-                        st.code(html, language="html")
-
-
+            for j, html in enumerate(tables):
+                st.markdown(f"**Table {j + 1}**")
+                df = parse_table_html(html)
+                if df is not None:
+                    st.dataframe(df, width="stretch")
+                else:
+                    st.warning("Could not parse table.")
+                    st.code(html, language="html")

@@ -122,55 +122,29 @@ def health() -> dict:
     return response.json()
 
 
-def retrieve(query: str, top_k: int = 5) -> dict:
-    """Retrieve chunks only (no answer generation)."""
-    response = requests.post(
-        _url("/v1/retrieve"),
-        json={"query": query, "top_k": top_k},
-        timeout=_REQUEST_TIMEOUT,
-    )
-    _raise_for_status(response)
-    return _absolutize_image_urls(response.json())
-
-
-def query(
-    query: str,
-    top_k: int = 5,
-    max_images: int = 3,
-    llm: dict | None = None,
-) -> dict:
-    """Retrieve chunks and generate the full answer in one call.
-
-    Args:
-        query: The question.
-        top_k: How many chunks to retrieve.
-        max_images: Most figures to send to the model (0 = all).
-        llm: Optional ``{"provider", "model", "api_key", "temperature",
-            "max_tokens"}`` to answer with that model and key; the server's
-            default model when omitted.
-
-    Raises:
-        requests.HTTPError: On any 4xx or 5xx, with the server's detail.
-    """
-    body: dict = {"query": query, "top_k": top_k, "max_images": max_images}
-    if llm is not None:
-        body["llm"] = llm
-    response = requests.post(_url("/v1/query"), json=body, timeout=_REQUEST_TIMEOUT)
-    _raise_for_status(response)
-    return _absolutize_figure_urls(_absolutize_image_urls(response.json()))
-
-
 def stream(
     query: str,
     top_k: int = 5,
     max_images: int | None = None,
     llm: dict | None = None,
 ) -> Iterator[tuple[str, dict]]:
-    """Stream SSE events for the same question and model options as :func:`query`.
+    """Ask a question over ``POST /v1/query/stream`` and yield its events as they arrive.
 
-    Yields ``(event, data)`` pairs where ``event`` is one of
-    ``retrieval``, ``token``, ``done`` or ``error``.
-    Raises ``requests.HTTPError`` for failures before the stream starts.
+    Args:
+        query: The question.
+        top_k: How many chunks to retrieve.
+        max_images: Most figures to send to the model (0 = all); the
+            server's default when None.
+        llm: Optional ``{"provider", "model", "api_key", "temperature",
+            "max_tokens"}`` to answer with that model and key; the server's
+            default model when omitted.
+
+    Yields:
+        ``(event, data)`` pairs where ``event`` is ``retrieval`` (sent before
+        the model is called), ``token``, ``done`` or ``error``.
+
+    Raises:
+        requests.HTTPError: For failures before the stream starts (422, 503).
     """
     body: dict = {"query": query, "top_k": top_k}
     if max_images is not None:

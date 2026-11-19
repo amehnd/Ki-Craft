@@ -1,23 +1,30 @@
-"""How an answer's evidence is drawn: retrieved chunks, figures and usage.
+"""How an answer's evidence is drawn on the Query page: chunks, figures and usage.
 
-Used by the Query page. The data comes from the API's ``retrieval`` and
-``done`` stream events (or a ``POST /v1/query`` response).
+The data comes from the ``/v1/query/stream`` events: ``retrieval`` carries
+the chunks, ``done`` the answer, its ``figures``, ``citations`` and
+``usage``. Each function draws one section into whatever container the
+caller opens, so the page can fill sections in place while the answer
+streams, and draw them again from session state on later reruns.
 """
 
 from __future__ import annotations
 
-from typing import Optional
-
 import streamlit as st
 
-from components.chunk_view import render_chunk_payload
+from components.chunk_view import render_retrieved_chunk
 
-def render_retrieval(retrieval: dict) -> None:
-    """Render the ``chunks`` of a retrieve/query API response."""
-    chunks = retrieval.get("chunks", [])
-    with st.expander(f"**Referenced Chunks** — {len(chunks)} chunks", expanded=True):
-        for i, payload in enumerate(chunks):
-            render_chunk_payload(payload, i)
+
+def render_chunks(chunks: list[dict], cited_chunks: list[int]) -> None:
+    """Draw the retrieved chunks, each marked when the answer cites it.
+
+    Args:
+        chunks: The API's ``chunks`` list, most relevant first.
+        cited_chunks: ``citations.chunks``, the ``chunk_id`` of each cited
+            chunk; empty while the answer is still being written.
+    """
+    st.markdown(f"#### Retrieved chunks ({len(chunks)})")
+    for chunk in chunks:
+        render_retrieved_chunk(chunk, cited=chunk.get("chunk_id") in cited_chunks)
 
 
 def cited_first(figures: list[dict], citations: dict) -> list[tuple[dict, bool]]:
@@ -39,60 +46,54 @@ def cited_first(figures: list[dict], citations: dict) -> list[tuple[dict, bool]]
     return cited + rest
 
 
-def render_figures(figures: list[dict], citations: dict) -> None:
-    """Show the figures the model saw under the answer, cited ones first.
+def render_figure_row(title: str, figures: list[dict]) -> None:
+    """Draw figures three to a row under a heading; nothing when there are none.
 
-    A citation that matches no chunk or sent figure (``citations.unknown``)
-    is shown as a warning, since the answer points at evidence that was
-    never in the prompt.
+    Each caption gives the label the answer uses, the document and the chunk.
     """
+    if not figures:
+        return
+    st.markdown(f"#### {title}")
+    columns = st.columns(3)
+    for index, figure in enumerate(figures):
+        with columns[index % 3]:
+            st.image(
+                figure["url"],
+                caption=f"{figure['label']}: {figure['source']}, chunk C{figure['chunk_id']}",
+                width="stretch",
+            )
+
+
+def render_unknown_citations(citations: dict) -> None:
+    """Warn about cited labels that match no chunk or figure the model was given."""
     unknown = (citations or {}).get("unknown") or []
     if unknown:
         st.warning(
             f"The answer cites {', '.join(unknown)}, which match no chunk or "
             "figure the model was given."
         )
-    if not figures:
-        return
-    st.markdown("### Figures the model saw")
-    ordered = cited_first(figures, citations)
-    columns = st.columns(min(len(ordered), 3))
-    for index, (figure, cited) in enumerate(ordered):
-        state = "cited" if cited else "not cited"
-        caption = f"{figure['label']} ({state}): {figure['source']}, chunk C{figure['chunk_id']}"
-        with columns[index % len(columns)]:
-            st.image(figure["url"], caption=caption, width="stretch")
 
 
-def remember_answer(result: dict) -> None:
-    """Keep a finished answer's text, figures, citations and usage for later reruns."""
-    st.session_state.chat_answer = result.get("answer", "")
-    st.session_state.chat_figures = result.get("figures") or []
-    st.session_state.chat_citations = result.get("citations") or {}
-    st.session_state.chat_usage = result.get("usage")
+def render_usage(usage: dict | None, session: dict) -> None:
+    """Draw this answer's model, tokens, latency and cost, then the session's totals.
 
-
-def render_usage(usage: Optional[dict]) -> None:
-    """Render token usage and generation stats returned by the backend."""
+    Args:
+        usage: The ``done`` event's ``usage``, or None before an answer.
+        session: Running totals for this browser tab: ``answers``,
+            ``input_tokens``, ``output_tokens`` and ``cost``.
+    """
     if not usage:
         return
-
-    st.markdown("#### Usage")
-    col_a, col_b, col_c, col_d = st.columns(4)
-    col_a.metric("Model", usage.get("model", "—"))
-    col_b.metric("Input tokens", usage.get("input_tokens", 0))
-    col_c.metric("Output tokens", usage.get("output_tokens", 0))
-    col_d.metric("Total tokens", usage.get("total_tokens", 0))
-
     latency = usage.get("latency_ms")
-    latency_label = f"{latency:,.0f} ms" if isinstance(latency, (int, float)) else "—"
     cost = usage.get("estimated_cost_usd")
-    cost_label = f"${cost:.6f}" if isinstance(cost, (int, float)) else "—"
-
-    col_e, col_f, col_g, col_h = st.columns(4)
-    col_e.metric("Latency", latency_label)
-    col_f.metric("Prompt", f"{usage.get('prompt_chars', 0)} chars")
-    col_g.metric("Images", usage.get("prompt_images", 0))
-    col_h.metric("Est. cost", cost_label)
-
-
+    cols = st.columns(4)
+    cols[0].metric("Input tokens", f"{usage.get('input_tokens', 0):,}")
+    cols[1].metric("Output tokens", f"{usage.get('output_tokens', 0):,}")
+    cols[2].metric("Latency", f"{latency / 1000:.1f} s" if isinstance(latency, (int, float)) else "-")
+    cols[3].metric("Est. cost", f"${cost:.5f}" if isinstance(cost, (int, float)) else "-")
+    st.caption(
+        f"Answered by {usage.get('model', 'the default model')}. "
+        f"This session: {session['answers']} answer{'s' if session['answers'] != 1 else ''}, "
+        f"{session['input_tokens'] + session['output_tokens']:,} tokens, "
+        f"about ${session['cost']:.5f}."
+    )

@@ -1,180 +1,218 @@
-"""Query & Retrieve page (``/chat``): ask a question, stream the answer and its evidence."""
+"""Query & Retrieve page (``/chat``): ask a question and watch the answer and its evidence arrive.
+
+One question, all over HTTP through ``api_client.stream``:
+
+    click Ask -> POST /v1/query/stream
+      retrieval event (about 1 s)  -> the retrieved chunks are drawn at once
+      token events                 -> the answer grows in place
+      done event                   -> cited figures above the answer, the other
+                                      figures below it, chunks marked as cited,
+                                      token usage and cost
+      error event                  -> the error is shown; the chunks stay
+
+The page reserves one empty slot per section before the request starts
+(``_Slots``), so each event fills its own section without moving the others.
+Streamlit reruns the whole script on every click, so the finished result is
+kept in session state and drawn again into the same slots on later runs.
+"""
 
 from __future__ import annotations
+
+import time
+from dataclasses import dataclass
 
 import streamlit as st
 
 from api_client import API_BASE_URL
 from api_client import health as api_health
-from api_client import query as api_query
 from api_client import stream as api_stream
-from components.answer_view import remember_answer, render_figures, render_retrieval, render_usage
+from components.answer_view import (
+    cited_first,
+    render_chunks,
+    render_figure_row,
+    render_unknown_citations,
+    render_usage,
+)
 from components.model_settings import render_model_settings
 
 
-def render() -> None:
-    """Draw the page: model settings in the sidebar, question and answer in the body."""
-    render_model_settings()
-    render_chat_page()
+@dataclass
+class _Slots:
+    """One placeholder per page section, top to bottom, created before an answer starts."""
 
-def render_chat_page() -> None:
-    st.header("Query & Retrieve")
+    progress: st.delta_generator.DeltaGenerator
+    chunks: st.delta_generator.DeltaGenerator
+    cited: st.delta_generator.DeltaGenerator
+    answer: st.delta_generator.DeltaGenerator
+    others: st.delta_generator.DeltaGenerator
+    usage: st.delta_generator.DeltaGenerator
 
-    st.markdown(
-        "Enter a query to search the vector store and generate "
-        "a multimodal answer with referenced chunks. All retrieval and "
-        "generation runs on the FastAPI backend."
-    )
 
-    # Check the backend is reachable before doing anything else.
-    backend_problem = None
+def _make_slots() -> _Slots:
+    """Reserve the page sections in display order; each starts empty."""
+    return _Slots(*(st.empty() for _ in range(6)))
+
+
+def _backend_problem() -> str | None:
+    """Why the API cannot answer, or None when ``/health`` reports it ready."""
     try:
-        backend_status = api_health()
-        if backend_status.get("status") != "ok":
-            backend_problem = f"is running but unhealthy: {backend_status.get('detail', backend_status)}"
+        status = api_health()
     except Exception as exc:
-        backend_problem = f"is unreachable ({exc})"
+        return f"is unreachable ({exc})"
+    if status.get("status") != "ok":
+        return f"is running but unhealthy: {status.get('detail', status)}"
+    return None
 
-    if backend_problem:
-        st.error(
-            f"Backend API at `{API_BASE_URL}` {backend_problem}. "
-            "Set API_BASE_URL to the backend you want, e.g. "
-            "`API_BASE_URL=http://127.0.0.1:8001 streamlit run app/dashboard.py`."
-        )
-    else:
-        st.success(f"Backend connected — vector store: {backend_status.get('vector_store')}")
 
-    query = st.text_area(
-        "Query",
-        value=st.session_state.chat_query,
-        placeholder="Ask a question about your documents ...",
-        key="chat_query_input",
+def _requested_llm() -> dict | None:
+    """The ``llm`` object for the request: None for the server's default model.
+
+    Raises:
+        ValueError: If "Use my own model" is on but a provider, model or key is missing.
+    """
+    state = st.session_state
+    if not state.get("use_custom_provider"):
+        return None
+    model = (state.get("llm_custom_model") or "").strip() or state.get("llm_model")
+    if not (state.get("llm_provider") and model and state.get("llm_api_key")):
+        raise ValueError("Choose a provider and model and enter your API key, or untick \"Use my own model\".")
+    return {
+        "provider": state.llm_provider,
+        "model": model,
+        "api_key": state.llm_api_key,
+        "temperature": state.llm_temperature,
+        "max_tokens": state.llm_max_tokens or None,
+    }
+
+
+def _draw_answer(slots: _Slots, answer: str, done: dict | None, streaming: bool = False) -> None:
+    """Fill the answer and, once it is done, its figures and usage.
+
+    Args:
+        slots: The page sections.
+        answer: The answer text so far.
+        done: The ``done`` event's data, or None while the answer streams.
+        streaming: True while tokens are still arriving; shows a cursor.
+    """
+    slots.answer.markdown(f"### Answer\n\n{answer}{' ▌' if streaming else ''}")
+    if done is None:
+        return
+    ordered = cited_first(done.get("figures") or [], done.get("citations") or {})
+    with slots.cited.container():
+        render_figure_row("Cited figures", [figure for figure, cited in ordered if cited])
+    with slots.others.container():
+        render_unknown_citations(done.get("citations") or {})
+        render_figure_row("Other figures the model saw", [figure for figure, cited in ordered if not cited])
+    with slots.usage.container():
+        render_usage(done.get("usage"), st.session_state.chat_session_usage)
+
+
+def _add_to_session_usage(usage: dict | None) -> None:
+    """Add one answer's tokens and cost to this tab's running totals."""
+    if not usage:
+        return
+    totals = st.session_state.chat_session_usage
+    totals["answers"] += 1
+    totals["input_tokens"] += usage.get("input_tokens") or 0
+    totals["output_tokens"] += usage.get("output_tokens") or 0
+    totals["cost"] += usage.get("estimated_cost_usd") or 0.0
+
+
+def _ask(question: str, slots: _Slots) -> None:
+    """Send the question and fill each section as its stream event arrives.
+
+    The result is saved to session state as it arrives, so a later rerun
+    redraws whatever was received, including after an error.
+    """
+    state = st.session_state
+    state.chat_retrieval, state.chat_answer, state.chat_done, state.chat_error = None, None, None, None
+    try:
+        llm = _requested_llm()
+    except ValueError as exc:
+        slots.progress.error(str(exc))
+        return
+
+    started = time.perf_counter()
+    slots.progress.info("Retrieving chunks ...")
+    tokens: list[str] = []
+    try:
+        for event, data in api_stream(question, top_k=state.llm_top_k, max_images=state.llm_max_images, llm=llm):
+            elapsed = time.perf_counter() - started
+            if event == "retrieval":
+                state.chat_retrieval = data
+                with slots.chunks.container():
+                    render_chunks(data.get("chunks", []), [])
+                slots.progress.info(
+                    f"Found {data.get('num_chunks', 0)} chunks in {elapsed:.1f} s. Waiting for the model ..."
+                )
+            elif event == "token":
+                if not tokens:
+                    slots.progress.info(f"The model started answering after {elapsed:.1f} s ...")
+                tokens.append(data.get("delta", ""))
+                _draw_answer(slots, "".join(tokens), None, streaming=True)
+            elif event == "done":
+                state.chat_answer, state.chat_done = data.get("answer", ""), data
+                _add_to_session_usage(data.get("usage"))
+                slots.progress.success(f"Answered in {elapsed:.1f} s.")
+                _draw_answer(slots, state.chat_answer, data)
+                with slots.chunks.container():
+                    render_chunks(state.chat_retrieval.get("chunks", []), data.get("citations", {}).get("chunks", []))
+            elif event == "error":
+                state.chat_error = data.get("message", "Unknown backend error")
+                slots.progress.error(f"The model failed: {state.chat_error}")
+    except Exception as exc:
+        state.chat_error = str(exc)
+        slots.progress.error(f"Query failed: {exc}")
+        return
+    if tokens and state.chat_done is None:
+        # The stream ended mid-answer: keep what arrived, without a cursor.
+        state.chat_answer = "".join(tokens)
+        _draw_answer(slots, state.chat_answer, None)
+
+
+def _draw_saved(slots: _Slots) -> None:
+    """Draw the last question's result from session state, as it was left."""
+    state = st.session_state
+    if state.chat_error:
+        slots.progress.error(state.chat_error)
+    done = state.chat_done or {}
+    if state.chat_retrieval:
+        with slots.chunks.container():
+            render_chunks(state.chat_retrieval.get("chunks", []), done.get("citations", {}).get("chunks", []))
+    if state.chat_answer:
+        _draw_answer(slots, state.chat_answer, state.chat_done)
+
+
+def _clear() -> None:
+    """Forget the last question's result (the question text stays)."""
+    for key in ("chat_retrieval", "chat_answer", "chat_done", "chat_error"):
+        st.session_state[key] = None
+
+
+def render() -> None:
+    """Draw the page: settings in the sidebar, the question and its answer in the body."""
+    render_model_settings()
+    st.header("Query & Retrieve")
+    st.caption(
+        "Ask about the indexed datasheets. The retrieved chunks appear first, then the "
+        "answer as the model writes it, with the figures it cites right above it."
     )
+    problem = _backend_problem()
+    if problem:
+        st.error(
+            f"Backend API at `{API_BASE_URL}` {problem}. Set API_BASE_URL to the backend you "
+            "want, e.g. `API_BASE_URL=http://127.0.0.1:8001 streamlit run app/dashboard.py`."
+        )
 
-    col1, col2 = st.columns([1, 5])
-    with col1:
-        submitted = st.button("Search", type="primary", width="stretch")
-    with col2:
-        clear = st.button("Clear", width="stretch")
-        if clear:
-            st.session_state.chat_answer = None
-            st.session_state.chat_retrieval = None
-            st.session_state.chat_usage = None
-            st.session_state.chat_figures = []
-            st.session_state.chat_citations = {}
-            st.rerun()
+    question = st.text_area("Question", key="chat_query", placeholder="Ask a question about your documents ...")
+    col1, col2, _ = st.columns([1, 1, 4])
+    submitted = col1.button("Ask", type="primary", width="stretch")
+    col2.button("Clear", width="stretch", on_click=_clear)
 
-    if submitted and query.strip():
-        st.session_state.chat_query = query
-        try:
-            use_custom = st.session_state.get("use_custom_provider", False)
-
-            if use_custom:
-                # Custom provider mode: POST /v1/query with an llm object
-                provider = st.session_state.get("llm_provider")
-                model = st.session_state.get("llm_model")
-                custom_model = (st.session_state.get("llm_custom_model") or "").strip()
-                if custom_model:
-                    model = custom_model
-                api_key = st.session_state.get("llm_api_key")
-                temperature = st.session_state.get("llm_temperature", 0.0)
-                max_tokens = st.session_state.get("llm_max_tokens", 0) or None
-                max_images = st.session_state.get("llm_max_images", 3)
-
-                if not (provider and model and api_key):
-                    st.error("Please select provider, model, and enter API key for custom provider mode.")
-                    return
-
-                status = st.status(f"Querying {provider}/{model} ...", expanded=True)
-                answer_placeholder = st.empty()
-
-                with st.spinner("Retrieving chunks and generating answer..."):
-                    result = api_query(
-                        query,
-                        top_k=st.session_state.get("llm_top_k", 5),
-                        max_images=max_images,
-                        llm={
-                            "provider": provider,
-                            "model": model,
-                            "api_key": api_key,
-                            "temperature": temperature,
-                            "max_tokens": max_tokens,
-                        },
-                    )
-
-                retrieval = result
-                chunks = retrieval.get("chunks", [])
-                st.session_state.chat_retrieval = retrieval
-                status.update(
-                    label=f"Retrieved {len(chunks)} chunks",
-                    state="complete",
-                    expanded=False,
-                )
-                render_retrieval(retrieval)
-
-                answer_placeholder.markdown(f"### Answer\n\n{result.get('answer', '')}")
-                remember_answer(result)
-                render_figures(st.session_state.chat_figures, st.session_state.chat_citations)
-                render_usage(result.get("usage"))
-
-            else:
-                # Default backend mode - use streaming
-                events = api_stream(
-                    query,
-                    top_k=st.session_state.get("llm_top_k", 5),
-                    max_images=st.session_state.get("llm_max_images"),
-                )
-                status = st.status("Retrieving relevant chunks ...", expanded=True)
-                answer_placeholder = st.empty()
-                collected: list[str] = []
-
-                for event, data in events:
-                    if event == "retrieval":
-                        retrieval = data
-                        chunks = retrieval.get("chunks", [])
-                        st.session_state.chat_retrieval = retrieval
-                        status.update(
-                            label=f"Retrieved {len(chunks)} chunks",
-                            state="complete",
-                            expanded=False,
-                        )
-                        render_retrieval(retrieval)
-                    elif event == "token":
-                        collected.append(data.get("delta", ""))
-                        answer_placeholder.markdown(f"### Answer\n\n{''.join(collected)}▌")
-                    elif event == "done":
-                        answer_placeholder.markdown(f"### Answer\n\n{data.get('answer', '')}")
-                        remember_answer(data)
-                        render_figures(st.session_state.chat_figures, st.session_state.chat_citations)
-                        render_usage(data.get("usage"))
-                    elif event == "error":
-                        status.update(label="Answer generation failed", state="error")
-                        st.error(data.get("message", "Unknown backend error"))
-
-                if not collected:
-                    answer_placeholder.markdown("### Answer\n\n*No answer returned.*")
-        except Exception as e:
-            st.error(f"Query failed: {e}")
-
-    # Display persisted results on subsequent script runs.
-    answer = st.session_state.get("chat_answer")
-    retrieval = st.session_state.get("chat_retrieval")
-
-    if answer is None and retrieval is None:
-        st.info("Enter a query and press Search to get started.")
-        return
-
-    if submitted and query.strip():
-        return
-
-    if retrieval:
-        render_retrieval(retrieval)
-
-    if answer:
-        st.markdown("### Answer")
-        st.markdown(answer)
-        render_figures(st.session_state.get("chat_figures") or [], st.session_state.get("chat_citations") or {})
-
-    render_usage(st.session_state.get("chat_usage"))
-
-
+    slots = _make_slots()
+    if submitted and question.strip():
+        _ask(question.strip(), slots)
+    elif st.session_state.chat_retrieval or st.session_state.chat_error:
+        _draw_saved(slots)
+    else:
+        slots.progress.info("Enter a question and press Ask.")
