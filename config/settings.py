@@ -60,8 +60,14 @@ EMBEDDING_MAX_INPUT_TOKENS: int = 512
 # came from the watsonx model, so any replacement must produce vectors in the
 # same space (see src/embed.py).
 EMBEDDING_BACKEND: str = _env_choice("EMBEDDING_BACKEND", "watsonx", ("watsonx", "local"))
-# Open-weights release of the model above; same 768-dim vector space.
-LOCAL_EMBEDDING_MODEL: str = "ibm-granite/granite-embedding-278m-multilingual"
+# GGUF build of the model above, run by llama.cpp (no torch). Q8_0 matches the
+# stored vectors at cosine 0.9999; see CONTRIBUTING.md for the download.
+LOCAL_EMBEDDING_GGUF_PATH: str = os.getenv(
+    "LOCAL_EMBEDDING_GGUF_PATH", "models/granite-embedding-278m-multilingual-Q8_0.gguf"
+)
+# CPU threads for the local embedder. One keeps a small server (for example
+# 0.1 vCPU) from oversubscribing its CPU share.
+LOCAL_EMBEDDING_THREADS: int = int(os.getenv("LOCAL_EMBEDDING_THREADS", "1"))
 # Default provider and model used to answer retrieval queries.  Both must be
 # listed in config/providers.py; the API key is GEMINI_API_KEY.
 GENERATION_PROVIDER: str = "gemini"
