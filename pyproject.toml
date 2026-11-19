@@ -31,6 +31,8 @@ dev = [
 ]
 
 [project.optional-dependencies]
+# Open-weights Granite embedder for EMBEDDING_BACKEND=local (pulls in torch).
+local-embeddings = ["langchain-huggingface>=0.1", "sentence-transformers>=3.0"]
 # Local summary model for ingestion (python -m mlx_vlm.server). MLX runs only
 # on Apple silicon, so the marker keeps installs elsewhere working.
 local = ["mlx-vlm>=0.7.12; sys_platform == 'darwin' and platform_machine == 'arm64'"]

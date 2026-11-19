@@ -7,15 +7,23 @@ ingestion pipeline (when creating the vector store) and the retrieval path
 Embeddings are served by IBM watsonx.ai, so the store must be re-indexed
 whenever ``EMBEDDING_MODEL`` changes: vectors from different models are not
 comparable and usually differ in dimension.
+
+``EMBEDDING_BACKEND=local`` runs the open-weights release of the same Granite
+model on this machine, for querying the existing store without watsonx
+credentials. It normalises vectors; do not ingest with it into a store built
+with watsonx.
 """
 
 from __future__ import annotations
 
+from langchain_core.embeddings import Embeddings
 from langchain_ibm import WatsonxEmbeddings
 
 from config.settings import (
+    EMBEDDING_BACKEND,
     EMBEDDING_MAX_INPUT_TOKENS,
     EMBEDDING_MODEL,
+    LOCAL_EMBEDDING_MODEL,
     WATSONX_API_KEY,
     WATSONX_PROJECT_ID,
     WATSONX_URL,
@@ -25,8 +33,23 @@ from src.logger import get_logger
 logger = get_logger(__name__)
 
 
-def load_embedding_model() -> WatsonxEmbeddings:
-    """Create the watsonx.ai embedding model configured in settings.
+def _load_local_embedding_model() -> Embeddings:
+    """Load the open-weights Granite model with L2-normalised output."""
+    # Imported here so the watsonx deployment never needs torch installed.
+    from langchain_huggingface import HuggingFaceEmbeddings
+
+    logger.info("Loading local embedding model: %s", LOCAL_EMBEDDING_MODEL)
+    return HuggingFaceEmbeddings(
+        model_name=LOCAL_EMBEDDING_MODEL,
+        encode_kwargs={"normalize_embeddings": True},
+    )
+
+
+def load_embedding_model() -> Embeddings:
+    """Create the embedding model configured in settings.
+
+    With ``EMBEDDING_BACKEND=local`` this loads the open-weights model on this
+    machine instead (see :func:`_load_local_embedding_model`).
 
     Inputs longer than ``EMBEDDING_MAX_INPUT_TOKENS`` are truncated by the
     service; without this, watsonx rejects the whole request with a 400.
@@ -40,6 +63,9 @@ def load_embedding_model() -> WatsonxEmbeddings:
             set, so the failure names the missing variable instead of
             surfacing as an opaque authentication error.
     """
+    if EMBEDDING_BACKEND == "local":
+        return _load_local_embedding_model()
+
     missing = [
         name
         for name, value in (

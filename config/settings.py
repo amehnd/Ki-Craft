@@ -55,6 +55,11 @@ WATSONX_URL: str = os.getenv("WATSONX_URL", "https://eu-de.ml.cloud.ibm.com")
 EMBEDDING_MODEL: str = "ibm/granite-embedding-278m-multilingual"
 # The model's context limit; longer inputs are truncated by watsonx.
 EMBEDDING_MAX_INPUT_TOKENS: int = 512
+# "watsonx" calls the hosted service; "local" runs the same model's open weights
+# on this machine (for retrieval without watsonx credentials).
+EMBEDDING_BACKEND: str = _env_choice("EMBEDDING_BACKEND", "watsonx", ("watsonx", "local"))
+# Open-weights release of the model above; same 768-dim vector space.
+LOCAL_EMBEDDING_MODEL: str = "ibm-granite/granite-embedding-278m-multilingual"
 # Default provider and model used to answer retrieval queries.  Both must be
 # listed in config/providers.py; the API key is GEMINI_API_KEY.
 GENERATION_PROVIDER: str = "gemini"
