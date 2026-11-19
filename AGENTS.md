@@ -88,7 +88,7 @@ The owner wants depth here. At each hop, also explain from first principles what
 ```
 config/settings.py      every tunable and environment variable
 config/providers.py     catalogue of LLM providers and models the query llm object accepts
-src/embed.py            the one embedding factory (IBM watsonx Granite, 768 dims; EMBEDDING_BACKEND=local runs the same open weights)
+src/embed.py            the one embedding factory (IBM watsonx Granite, 768 dims; EMBEDDING_BACKEND=local runs a GGUF build of it with llama.cpp)
 src/llm.py              the one chat model factory: catalogue entry -> LangChain client; default_llm
 src/ingestion/          offline pipeline: PDF -> elements -> chunks -> summaries -> Chroma
   extract.py              unstructured partition_pdf (hi_res, tables, images); drops headers, footers, logos
@@ -171,7 +171,7 @@ Notes:
 
 ## Environment variables
 
-`GEMINI_API_KEY`, `HF_TOKEN`, `EMBEDDING_BACKEND` (`watsonx` or `local`), `WATSONX_API_KEY`, `WATSONX_PROJECT_ID`, `WATSONX_URL`, `API_BASE_URL`, `CORS_ALLOWED_ORIGINS`, `GENERATION_MAX_TOKENS`, and the LangSmith variables (`LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`). See `config/settings.py` for defaults. `LANGSMITH_TRACING` is the one tracing switch: when it is unset the legacy `LANGCHAIN_TRACING_V2` is used, and `config/settings.py` writes the result to `LANGSMITH_TRACING_V2`, which the langsmith library checks first.
+`GEMINI_API_KEY`, `HF_TOKEN`, `EMBEDDING_BACKEND` (`watsonx` or `local`, with `LOCAL_EMBEDDING_GGUF_PATH` and `LOCAL_EMBEDDING_THREADS`), `WATSONX_API_KEY`, `WATSONX_PROJECT_ID`, `WATSONX_URL`, `API_BASE_URL`, `CORS_ALLOWED_ORIGINS`, `GENERATION_MAX_TOKENS`, and the LangSmith variables (`LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`). See `config/settings.py` for defaults. `LANGSMITH_TRACING` is the one tracing switch: when it is unset the legacy `LANGCHAIN_TRACING_V2` is used, and `config/settings.py` writes the result to `LANGSMITH_TRACING_V2`, which the langsmith library checks first.
 
 Ingestion summaries: `ENHANCEMENT_BACKEND` (`huggingface` or `local`) and the `ENHANCEMENT_*` and `LOCAL_ENHANCEMENT_*` tunables; see the ingestion section of `CONTRIBUTING.md`.
 
