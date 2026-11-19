@@ -342,6 +342,7 @@ Every tunable lives in `config/settings.py`.
 | Setting | Value | Purpose |
 |---|---|---|
 | `EMBEDDING_MODEL` | `ibm/granite-embedding-278m-multilingual` | Embedding model on watsonx.ai; changing it means re-indexing |
+| `EMBEDDING_BACKEND` | `watsonx` | `local` runs the open-weights Granite model on this machine (retrieval without watsonx credentials); needs `uv sync --extra local-embeddings` |
 | `EMBEDDING_MAX_INPUT_TOKENS` | `512` | The model's input limit; longer text is truncated |
 | `GENERATION_MODEL` | `gemini-3.5-flash-lite` | Default answer model |
 | `GENERATION_MAX_TOKENS` | `512` | Output limit per answer (environment variable) |

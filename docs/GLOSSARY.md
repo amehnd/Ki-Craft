@@ -8,6 +8,8 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **Cosine similarity.** How close two embeddings are, measured by the angle between them: 1 means the same direction, 0 means unrelated. Chroma and pgvector both rank chunks by it here.
 
+**Normalization.** Scaling an embedding so its length is 1. After that, cosine similarity and the dot product give the same ranking. The local embedding backend normalises every vector (`encode_kwargs`, `src/embed.py`).
+
 **Vector store.** A database that stores embeddings and finds the nearest ones to a query embedding. Here: Chroma today, Postgres with pgvector after Checkpoint 6.
 
 **HNSW (Hierarchical Navigable Small World).** The index that makes nearest-neighbour search fast. It builds a layered graph of vectors and walks it towards the query instead of comparing against every vector. The result is approximate but very close to exact. Chroma and pgvector both use it.
