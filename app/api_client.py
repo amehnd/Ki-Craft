@@ -185,7 +185,9 @@ def stream(
     ) as response:
         _raise_for_status(response)
         event: str | None = None
-        for line in response.iter_lines(decode_unicode=True):
+        # chunk_size=None hands over data as it arrives; the default (512
+        # bytes) would hold small token frames back until more data came.
+        for line in response.iter_lines(chunk_size=None, decode_unicode=True):
             if not line:
                 continue
             if line.startswith("event:"):

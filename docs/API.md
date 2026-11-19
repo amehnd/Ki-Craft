@@ -312,15 +312,16 @@ do {
 
 `POST /v1/query/stream` takes the same JSON body as `POST /v1/query`. The
 response uses **[Server-Sent Events](GLOSSARY.md#api-and-serving)**
-(`Content-Type: text/event-stream`). The server waits for the first answer
-fragment before sending the response headers.
+(`Content-Type: text/event-stream`). The chunks are sent as soon as they are
+found, before the model is called, so you can show the evidence while the
+model is still working (that can take tens of seconds).
 
 | Event | `data` payload | When |
 |---|---|---|
-| `retrieval` | a full `RetrieveResponse` (the chunks) | first, once the first answer fragment is ready |
+| `retrieval` | a full `RetrieveResponse` (the chunks) | first, as soon as retrieval finishes |
 | `token` | `{"delta": "The "}` | many times, one fragment of the answer each |
 | `done` | `{"answer": "...", "answer_characters": 1086, "num_chunks": 2, "figures": [...], "citations": {...}, "usage": {...}}` | after the last token; `figures` and `citations` as in `/v1/query` |
-| `error` | `{"status": 502, "message": "..."}` | replaces `done` if the provider fails after the stream starts. Unexpected server errors carry `status: 500` |
+| `error` | `{"status": 502, "message": "..."}` | replaces `done` if the provider fails, before or after the first `token`. Unexpected server errors carry `status: 500` |
 
 ```bash
 curl -N http://localhost:8000/v1/query/stream \
@@ -333,9 +334,11 @@ reading `response.body`. Decode the body as text and buffer partial frames
 until the blank line that ends each event. Append each `token` event's
 `delta` to the displayed answer and use `done.answer` as the final text.
 
-Before the stream opens, a provider failure returns HTTP `502` and an
-unavailable store returns HTTP `503`. After the headers are sent the HTTP
-status stays `200`, and the `error` event carries the failure status.
+An invalid `llm` returns HTTP `422` and an unavailable store HTTP `503`,
+before the stream opens. Every model failure comes after the `retrieval`
+event, when the HTTP status is already `200`, so it arrives as an `error`
+event carrying the failure status (`502` for the provider). If you need a
+provider failure as a real HTTP `502`, use `POST /v1/query`.
 
 ---
 

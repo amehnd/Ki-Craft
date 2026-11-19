@@ -416,15 +416,24 @@ def test_query_llm_failure_is_502(client, backend):
     assert response.json() == {"detail": "The model provider failed: quota exceeded"}
 
 
-@pytest.mark.parametrize("path", ["/v1/query", "/v1/query/stream"])
 @pytest.mark.parametrize("finish_reason", ["length", "MAX_TOKENS"])
-def test_answer_cut_off_before_any_text_is_502(client, backend, finish_reason, path):
+def test_answer_cut_off_before_any_text_is_502(client, backend, finish_reason):
     """OpenAI-style and Gemini names for "stopped at max_tokens" both count."""
     backend.finish_reason = finish_reason
-    response = client.post(path, json={"query": "LM317 pins", "top_k": 2})
+    response = client.post("/v1/query", json={"query": "LM317 pins", "top_k": 2})
     assert response.status_code == 502
     assert "whole output budget (512 tokens" in response.json()["detail"]
     assert "Raise max_tokens" in response.json()["detail"]
+
+
+def test_stream_answer_cut_off_before_any_text_is_an_error_event(client, backend):
+    """The retrieval frame was already sent, so the failure arrives in the stream."""
+    backend.finish_reason = "MAX_TOKENS"
+    response = client.post("/v1/query/stream", json={"query": "LM317 pins", "top_k": 2})
+    assert response.status_code == 200
+    events = _parse_sse(response.text)
+    assert [name for name, _ in events] == ["retrieval", "error"]
+    assert events[-1][1]["status"] == 502 and "Raise max_tokens" in events[-1][1]["message"]
 
 
 def test_empty_answer_for_another_reason_is_502(client, backend):
@@ -482,11 +491,15 @@ def test_stream_reports_llm_failure_as_error_event(client, backend):
     assert events[-1][1] == {"status": 502, "message": "The model provider failed: quota exceeded"}
 
 
-def test_stream_provider_failure_before_first_token_is_502(client, backend):
+def test_stream_sends_chunks_before_the_model_answers(client, backend):
+    """Retrieval goes out first; a model failure before any token is an error event."""
     backend.llm_error = "quota exceeded"
     response = client.post("/v1/query/stream", json={"query": "LM317 pins", "top_k": 2})
-    assert response.status_code == 502
-    assert response.json() == {"detail": "The model provider failed: quota exceeded"}
+    assert response.status_code == 200
+    events = _parse_sse(response.text)
+    assert [name for name, _ in events] == ["retrieval", "error"]
+    assert events[0][1]["num_chunks"] == 2
+    assert events[-1][1] == {"status": 502, "message": "The model provider failed: quota exceeded"}
 
 
 def test_stream_replaces_get_and_documents_the_shared_body(client):

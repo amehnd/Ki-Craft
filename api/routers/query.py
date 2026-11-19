@@ -105,7 +105,15 @@ def _stream_frames(
     req: QueryRequest,
     llm: BaseChatModel | None,
 ) -> Generator[str, None, None]:
-    """Format the service events, raising early failures before the first frame."""
+    """Format the service events as SSE frames.
+
+    The ``retrieval`` frame goes out as soon as the chunks are found, before
+    the model is called, so a client can show the evidence while the model
+    is still thinking. Retrieval and store failures happen before that first
+    frame and so are still HTTP errors; a model failure at any point after
+    it, before or after the first token, ends the stream with an ``error``
+    event (the 200 status has already been sent).
+    """
     events = service.stream_answer(
         req.query,
         req.top_k,
@@ -117,12 +125,10 @@ def _stream_frames(
     with closing(events):
         _, chunks = next(events)
         _, figures = next(events)
-        _, first_token = next(events)
         retrieval = service.to_retrieve_response(req.query, chunks)
         figure_payloads = service.to_figure_payloads(figures)
         yield _sse("retrieval", retrieval.model_dump())
-        yield _sse("token", {"delta": first_token})
-        tokens = [first_token]
+        tokens: list[str] = []
         try:
             for kind, value in events:
                 if kind == "token":
@@ -163,12 +169,15 @@ def _stream_frames(
         "| `token` | `{\"delta\": \"...\"}`, one per answer fragment |\n"
         "| `done` | `answer`, `answer_characters`, `num_chunks`, `figures`, `citations`, `usage` |\n"
         "| `error` | `{\"status\": 502, \"message\": \"...\"}`, in place of `done` |\n\n"
-        "Errors before the first fragment are ordinary HTTP errors (422, 502, 503). "
-        "Errors after it end the stream with an `error` event. Swagger UI shows "
+        "`retrieval` is sent as soon as the chunks are found, before the model is "
+        "called. Errors before it (an invalid `llm`, a store that cannot load) are "
+        "ordinary HTTP errors (422, 503). A model failure after it, even before the "
+        "first `token`, ends the stream with an `error` event; use `POST /v1/query` "
+        "if you need a provider failure as an HTTP 502. Swagger UI shows "
         "the stream only once it ends; use `curl -N` or `fetch` to read it live."
     ),
     response_description="A `text/event-stream` of the events above.",
-    responses={200: {"content": {"text/event-stream": {}}}, **error_responses(500, 502, 503)},
+    responses={200: {"content": {"text/event-stream": {}}}, **error_responses(500, 503)},
 )
 async def query_stream(
     request: Request,
@@ -176,14 +185,16 @@ async def query_stream(
 ) -> StreamingResponse:
     """Take a question and model options and stream the answer over SSE.
 
-    An invalid model raises HTTPException (422). Store and provider errors
-    before the response starts reach the application's HTTP error handlers.
+    An invalid model raises HTTPException (422). Store and retrieval errors
+    before the first frame reach the application's HTTP error handlers; model
+    errors arrive later, as ``error`` events.
     """
     service = request.app.state.service
     llm = _requested_llm(req.llm)
     await service.ensure_ready()
     frames = _stream_frames(service, req, llm)
-    # StreamingResponse sends HTTP headers before it reads the body iterator.
+    # StreamingResponse sends HTTP headers before it reads the body iterator,
+    # so the retrieval frame is built first: a store failure is still an HTTP error.
     first_frame = await run_in_threadpool(next, frames)
 
     async def generate() -> AsyncIterator[str]:
