@@ -1,9 +1,10 @@
 """Thin HTTP client for the FastAPI backend (``api.main``).
 
 Lets the Streamlit dashboard talk to the API instead of loading the vector
-store and calling the LLM itself.  Image URLs returned by the backend are
-relative (``/v1/images/{record_id}/{position}``); this client rewrites them to
-absolute URLs so ``st.image`` can load them directly.
+store and calling the LLM itself.  Image URLs returned by the backend (each
+chunk's ``image_urls`` and each ``figures`` entry's ``url``) are relative,
+``/v1/images/{record_id}/{position}``; this client rewrites them to absolute
+URLs so ``st.image`` can load them directly.
 
 The backend's address is the client's one setting, read here from the
 environment rather than from ``config/settings.py``: the UI shares no code
@@ -57,6 +58,13 @@ def _absolutize_image_urls(payload: dict[str, Any], key: str = "chunks") -> dict
     """
     for chunk in payload.get(key, []):
         chunk["image_urls"] = [_url(u) for u in chunk.get("image_urls", [])]
+    return payload
+
+
+def _absolutize_figure_urls(payload: dict[str, Any]) -> dict[str, Any]:
+    """Turn each ``figures`` entry's relative ``url`` into an absolute backend URL."""
+    for figure in payload.get("figures", []):
+        figure["url"] = _url(figure["url"])
     return payload
 
 
@@ -149,7 +157,7 @@ def query(
         body["llm"] = llm
     response = requests.post(_url("/v1/query"), json=body, timeout=_REQUEST_TIMEOUT)
     _raise_for_status(response)
-    return _absolutize_image_urls(response.json())
+    return _absolutize_figure_urls(_absolutize_image_urls(response.json()))
 
 
 def stream(
@@ -186,4 +194,6 @@ def stream(
                 data = json.loads(line.split(":", 1)[1].strip())
                 if event == "retrieval":
                     data = _absolutize_image_urls(data)
+                elif event == "done":
+                    data = _absolutize_figure_urls(data)
                 yield event, data

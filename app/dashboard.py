@@ -668,6 +668,8 @@ def init_state() -> None:
         "chat_answer": None,
         "chat_retrieval": None,
         "chat_usage": None,
+        "chat_figures": [],
+        "chat_citations": {},
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -1437,6 +1439,58 @@ def _render_retrieval(retrieval: dict) -> None:
             _render_chunk_payload(payload, i)
 
 
+def cited_first(figures: list[dict], citations: dict) -> list[tuple[dict, bool]]:
+    """Order figures for display: cited ones first, then the rest.
+
+    Args:
+        figures: The response's ``figures``, in prompt order.
+        citations: The response's ``citations``; its ``figures`` lists the
+            cited labels in the order the answer first cites them.
+
+    Returns:
+        ``(figure, cited)`` pairs: cited figures in citation order, then the
+        uncited ones in prompt order.
+    """
+    cited_labels = (citations or {}).get("figures") or []
+    by_label = {figure["label"]: figure for figure in figures}
+    cited = [(by_label[label], True) for label in cited_labels if label in by_label]
+    rest = [(figure, False) for figure in figures if figure["label"] not in cited_labels]
+    return cited + rest
+
+
+def _render_figures(figures: list[dict], citations: dict) -> None:
+    """Show the figures the model saw under the answer, cited ones first.
+
+    A citation that matches no chunk or sent figure (``citations.unknown``)
+    is shown as a warning, since the answer points at evidence that was
+    never in the prompt.
+    """
+    unknown = (citations or {}).get("unknown") or []
+    if unknown:
+        st.warning(
+            f"The answer cites {', '.join(unknown)}, which match no chunk or "
+            "figure the model was given."
+        )
+    if not figures:
+        return
+    st.markdown("### Figures the model saw")
+    ordered = cited_first(figures, citations)
+    columns = st.columns(min(len(ordered), 3))
+    for index, (figure, cited) in enumerate(ordered):
+        state = "cited" if cited else "not cited"
+        caption = f"{figure['label']} ({state}): {figure['source']}, chunk C{figure['chunk_id']}"
+        with columns[index % len(columns)]:
+            st.image(figure["url"], caption=caption, width="stretch")
+
+
+def _remember_answer(result: dict) -> None:
+    """Keep a finished answer's text, figures, citations and usage for later reruns."""
+    st.session_state.chat_answer = result.get("answer", "")
+    st.session_state.chat_figures = result.get("figures") or []
+    st.session_state.chat_citations = result.get("citations") or {}
+    st.session_state.chat_usage = result.get("usage")
+
+
 def _render_usage(usage: Optional[dict]) -> None:
     """Render token usage and generation stats returned by the backend."""
     if not usage:
@@ -1504,6 +1558,8 @@ def render_chat_page() -> None:
             st.session_state.chat_answer = None
             st.session_state.chat_retrieval = None
             st.session_state.chat_usage = None
+            st.session_state.chat_figures = []
+            st.session_state.chat_citations = {}
             st.rerun()
 
     if submitted and query.strip():
@@ -1554,10 +1610,9 @@ def render_chat_page() -> None:
                 )
                 _render_retrieval(retrieval)
 
-                answer = result.get("answer", "")
-                answer_placeholder.markdown(f"### Answer\n\n{answer}")
-                st.session_state.chat_answer = answer
-                st.session_state.chat_usage = result.get("usage")
+                answer_placeholder.markdown(f"### Answer\n\n{result.get('answer', '')}")
+                _remember_answer(result)
+                _render_figures(st.session_state.chat_figures, st.session_state.chat_citations)
                 _render_usage(result.get("usage"))
 
             else:
@@ -1586,10 +1641,9 @@ def render_chat_page() -> None:
                         collected.append(data.get("delta", ""))
                         answer_placeholder.markdown(f"### Answer\n\n{''.join(collected)}▌")
                     elif event == "done":
-                        full_answer = data.get("answer", "")
-                        answer_placeholder.markdown(f"### Answer\n\n{full_answer}")
-                        st.session_state.chat_answer = full_answer
-                        st.session_state.chat_usage = data.get("usage")
+                        answer_placeholder.markdown(f"### Answer\n\n{data.get('answer', '')}")
+                        _remember_answer(data)
+                        _render_figures(st.session_state.chat_figures, st.session_state.chat_citations)
                         _render_usage(data.get("usage"))
                     elif event == "error":
                         status.update(label="Answer generation failed", state="error")
@@ -1617,6 +1671,7 @@ def render_chat_page() -> None:
     if answer:
         st.markdown("### Answer")
         st.markdown(answer)
+        _render_figures(st.session_state.get("chat_figures") or [], st.session_state.get("chat_citations") or {})
 
     _render_usage(st.session_state.get("chat_usage"))
 
