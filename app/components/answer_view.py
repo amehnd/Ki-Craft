@@ -15,16 +15,20 @@ from components.chunk_view import render_retrieved_chunk
 
 
 def render_chunks(chunks: list[dict], cited_chunks: list[int]) -> None:
-    """Draw the retrieved chunks, each marked when the answer cites it.
+    """Draw the retrieved chunks in one collapsed panel, each marked when the answer cites it.
 
     Args:
         chunks: The API's ``chunks`` list, most relevant first.
         cited_chunks: ``citations.chunks``, the ``chunk_id`` of each cited
             chunk; empty while the answer is still being written.
     """
-    st.markdown(f"#### Retrieved chunks ({len(chunks)})")
-    for chunk in chunks:
-        render_retrieved_chunk(chunk, cited=chunk.get("chunk_id") in cited_chunks)
+    cited_count = sum(1 for chunk in chunks if chunk.get("chunk_id") in cited_chunks)
+    label = f"Retrieved chunks ({len(chunks)})" + (f" · {cited_count} cited" if cited_count else "")
+    # One collapsed panel holds the chunks, each its own panel inside it, so
+    # the answer stays near the top and you open only the chunks you want.
+    with st.expander(label):
+        for chunk in chunks:
+            render_retrieved_chunk(chunk, cited=chunk.get("chunk_id") in cited_chunks)
 
 
 def cited_first(figures: list[dict], citations: dict) -> list[tuple[dict, bool]]:
