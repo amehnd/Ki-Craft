@@ -22,6 +22,7 @@ def render() -> None:
         render_analytics(data)
 
 def render_analytics(data: list[dict]) -> None:
+    """Draw totals, four histograms and three top-20 tables for one document's chunks."""
     st.header("Dataset Analytics")
 
     df = pd.DataFrame(

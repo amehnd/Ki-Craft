@@ -91,14 +91,26 @@ def chunk_fields(chunk: dict) -> dict:
 
 
 def get_enhanced_content(chunk: dict) -> str:
+    """The chunk's summary written at ingestion (the text that is searched)."""
     return chunk.get("enhanced_content") or ""
 
 
 def word_count(text: str) -> int:
+    """Number of whitespace-separated words in ``text``."""
     return len(text.split())
 
 
 def health_score(chunk: dict) -> tuple[int, str]:
+    """Score a chunk 0 to 100 by which kinds of content it holds.
+
+    Each of summary, original text, figures and tables adds 25. The score
+    only says what is present, not whether it is right; it helps find chunks
+    that came out of extraction empty.
+
+    Returns:
+        ``(score, label)``: label is ``Pass`` from 75, ``Partial`` from 50,
+        else ``Fail``.
+    """
     score = 0
     if get_enhanced_content(chunk):
         score += 25
@@ -119,6 +131,7 @@ def health_score(chunk: dict) -> tuple[int, str]:
 
 
 def parse_table_html(html: str) -> Optional[pd.DataFrame]:
+    """Parse one HTML table into a DataFrame, or None when pandas cannot read it."""
     try:
         tables = pd.read_html(io.StringIO(html))
         if tables:
@@ -129,6 +142,7 @@ def parse_table_html(html: str) -> Optional[pd.DataFrame]:
 
 
 def build_chunk_df(data: list[dict]) -> pd.DataFrame:
+    """One row per chunk with its id, figure and table counts, text lengths and health score."""
     rows = []
     for c in data:
         cid = c.get("chunk_id", "?")

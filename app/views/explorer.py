@@ -27,6 +27,7 @@ def render() -> None:
     page_explorer(data)
 
 def render_dashboard(data: list[dict]) -> None:
+    """Draw the document-wide totals: chunks, figures, tables and average text lengths."""
     total = len(data)
     total_images = sum(len(get_image_urls(c)) for c in data)
     total_tables = sum(len(get_tables_html(c)) for c in data)
@@ -54,6 +55,7 @@ def render_dashboard(data: list[dict]) -> None:
 
 
 def render_chunk_list(data: list[dict]) -> None:
+    """Draw the chunk table; selecting a row opens that chunk in the detail panel."""
     st.subheader("Chunks")
     df = build_chunk_df(data)
     selection = st.dataframe(
@@ -82,6 +84,7 @@ def render_chunk_list(data: list[dict]) -> None:
 
 
 def page_explorer(data: list[dict]) -> None:
+    """Draw the totals, the filtered chunk list and the opened chunk side by side."""
     render_dashboard(data)
 
     filtered = apply_filters(data)

@@ -20,6 +20,7 @@ def render() -> None:
         render_compare(data)
 
 def render_compare(data: list[dict]) -> None:
+    """Draw two chunk pickers and the chosen chunks side by side."""
     st.header("Compare Chunks")
 
     ids = [c.get("chunk_id") for c in data]

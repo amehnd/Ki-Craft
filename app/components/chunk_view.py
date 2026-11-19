@@ -22,6 +22,7 @@ from chunk_data import (
 )
 
 def _health_color(score: int) -> str:
+    """The Streamlit colour name for a health score: green, orange or red."""
     if score >= 75:
         return "green"
     elif score >= 50:
@@ -30,12 +31,18 @@ def _health_color(score: int) -> str:
 
 
 def _status_badge(present: bool, label: str) -> str:
+    """A coloured PASS or FAIL label in Streamlit Markdown, for one kind of content."""
     if present:
         return f":green[PASS] {label}"
     return f":red[FAIL] {label}"
 
 
 def render_detail(chunk: dict) -> None:
+    """Draw one chunk in full: counts, health score, export buttons and a tab per content kind.
+
+    Args:
+        chunk: One chunk dict from ``GET /v1/documents/{id}/chunks``.
+    """
     cid = chunk.get("chunk_id", "?")
     images = get_image_urls(chunk)
     tables = get_tables_html(chunk)
@@ -99,6 +106,7 @@ def render_detail(chunk: dict) -> None:
 
 
 def _render_enhanced_tab(text: str) -> None:
+    """The summary as Markdown, with its word and character counts."""
     st.markdown(text)
 
     wc = word_count(text)
@@ -113,6 +121,7 @@ def _render_enhanced_tab(text: str) -> None:
 
 
 def _render_raw_tab(text: str) -> None:
+    """The original text, its counts and a download button."""
     wc = word_count(text)
     cc = len(text)
 
@@ -146,6 +155,7 @@ def _render_images_tab(image_urls: list[str]) -> None:
 
 
 def _render_tables_tab(tables: list[str]) -> None:
+    """Each table as a DataFrame (or raw HTML when it cannot be parsed), with its source."""
     if not tables:
         st.info("No tables found in this chunk.")
         return
@@ -176,6 +186,7 @@ def _render_metadata_tab(chunk: dict) -> None:
 
 
 def render_chunk_card(chunk: dict) -> None:
+    """Draw a compact view of one chunk for the Compare page: score, counts, content in expanders."""
     images = get_image_urls(chunk)
     tables = get_tables_html(chunk)
     raw = get_raw_text(chunk)
