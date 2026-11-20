@@ -4,24 +4,30 @@ Provides a single function to build the embedding model used by both the
 ingestion pipeline (when creating the vector store) and the retrieval path
 (when loading it back), guaranteeing both sides use the same configuration.
 
-Embeddings are served by IBM watsonx.ai, so the store must be re-indexed
-whenever ``EMBEDDING_MODEL`` changes: vectors from different models are not
-comparable and usually differ in dimension.
+``EMBEDDING_BACKEND`` picks where the vectors come from:
 
-The stored vectors were made by ``ibm/granite-embedding-278m-multilingual`` on
-watsonx. A query must be embedded into that same vector space, or its distances
-to the stored vectors mean nothing. ``EMBEDDING_BACKEND=local`` therefore runs a
-GGUF build of that same model with llama.cpp on this machine, so the store can be
-queried and extended without watsonx credentials and without torch. Another
-embedder works only if it produces vectors in the same space; two separately
-trained models almost never do, even with 768 dimensions. To check a candidate,
-embed some stored summaries with it and compare each with its stored vector: a
-cosine near 1.0 means the same space, anything much lower means the store must
-be re-indexed. The Q8_0 file scores 0.9999 against the stored vectors.
+- ``watsonx`` calls ``ibm/granite-embedding-278m-multilingual`` on IBM
+  watsonx.ai. The original store was built with it.
+- ``local`` runs a GGUF build of that same Granite model with llama.cpp on this
+  machine, so the Granite store can be queried and extended without watsonx
+  credentials and without torch. It needs ``uv sync --extra local-embeddings``
+  and the model file, so the API Docker image does not include it.
+- ``openrouter`` calls ``OPENROUTER_EMBEDDING_MODEL`` through OpenRouter's
+  OpenAI-compatible embeddings API. Granite is not offered there, so this is a
+  different model.
 
-Both backends give unit-length vectors and read at most
-``EMBEDDING_MAX_INPUT_TOKENS`` tokens per text, so local vectors are
-interchangeable with watsonx ones for both ingestion and retrieval.
+A query must be embedded into the same vector space as the stored vectors, or
+its distances to them mean nothing. Two separately trained models almost never
+share a space, even with the same number of dimensions, so changing the model
+means re-embedding the store. The watsonx and local backends give the same
+vectors: the GGUF Q8_0 file scores cosine 0.9999 against the stored watsonx
+vectors. To check another
+candidate for the same space, embed some stored summaries with it and compare
+each with its stored vector: a cosine near 1.0 means the same space.
+
+The Granite backends give unit-length vectors and read at most
+``EMBEDDING_MAX_INPUT_TOKENS`` tokens per text. The store uses cosine distance,
+so vector length does not affect ranking for any backend.
 """
 
 from __future__ import annotations
@@ -31,6 +37,7 @@ from pathlib import Path
 
 from langchain_core.embeddings import Embeddings
 from langchain_ibm import WatsonxEmbeddings
+from langchain_openai import OpenAIEmbeddings
 
 from config.settings import (
     EMBEDDING_BACKEND,
@@ -38,6 +45,12 @@ from config.settings import (
     EMBEDDING_MODEL,
     LOCAL_EMBEDDING_GGUF_PATH,
     LOCAL_EMBEDDING_THREADS,
+    OPENROUTER_API_KEY,
+    OPENROUTER_BASE_URL,
+    OPENROUTER_EMBEDDING_BATCH_SIZE,
+    OPENROUTER_EMBEDDING_MODEL,
+    OPENROUTER_MAX_RETRIES,
+    OPENROUTER_TIMEOUT_SECONDS,
     WATSONX_API_KEY,
     WATSONX_PROJECT_ID,
     WATSONX_URL,
@@ -98,6 +111,14 @@ class GGUFEmbeddings(Embeddings):
 
 def _load_local_embedding_model() -> Embeddings:
     """Load the GGUF Granite model configured in settings."""
+    try:
+        import llama_cpp  # noqa: F401  (checked here so the error says what to do)
+    except ImportError as exc:
+        raise RuntimeError(
+            "EMBEDDING_BACKEND=local needs llama-cpp-python (uv sync --extra local-embeddings). "
+            "The API Docker image does not include it: use EMBEDDING_BACKEND=watsonx or "
+            "openrouter there, or build the image with --build-arg EMBEDDING_BACKEND=local"
+        ) from exc
     logger.info(
         "Loading local embedding model: %s (%d thread(s))",
         LOCAL_EMBEDDING_GGUF_PATH,
@@ -106,28 +127,62 @@ def _load_local_embedding_model() -> Embeddings:
     return GGUFEmbeddings(LOCAL_EMBEDDING_GGUF_PATH, LOCAL_EMBEDDING_THREADS)
 
 
+def _load_openrouter_embedding_model() -> Embeddings:
+    """Build an OpenAI-protocol client for the OpenRouter model configured in settings."""
+    if not OPENROUTER_API_KEY:
+        raise RuntimeError("Missing OpenRouter credentials: OPENROUTER_API_KEY")
+    logger.info("Loading embedding model: %s (OpenRouter)", OPENROUTER_EMBEDDING_MODEL)
+    return OpenAIEmbeddings(
+        model=OPENROUTER_EMBEDDING_MODEL,
+        base_url=OPENROUTER_BASE_URL,
+        api_key=OPENROUTER_API_KEY,
+        # By default the client splits texts into tiktoken token ids, which only
+        # OpenAI's own models accept; OpenRouter needs the text itself.
+        check_embedding_ctx_length=False,
+        # The openai SDK otherwise asks for base64 and decodes it itself.
+        model_kwargs={"encoding_format": "float"},
+        chunk_size=OPENROUTER_EMBEDDING_BATCH_SIZE,
+        request_timeout=OPENROUTER_TIMEOUT_SECONDS,
+        max_retries=OPENROUTER_MAX_RETRIES,
+    )
+
+
+def embedding_model_id() -> str:
+    """Return the model whose vector space the configured backend produces.
+
+    The watsonx and local backends both give Granite vectors, so both return
+    ``EMBEDDING_MODEL``; OpenRouter returns ``OPENROUTER_EMBEDDING_MODEL``.
+    """
+    return OPENROUTER_EMBEDDING_MODEL if EMBEDDING_BACKEND == "openrouter" else EMBEDDING_MODEL
+
+
 def load_embedding_model() -> Embeddings:
     """Create the embedding model configured in settings.
 
-    With ``EMBEDDING_BACKEND=local`` this loads the GGUF model on this machine
-    instead (see :class:`GGUFEmbeddings`).
+    ``EMBEDDING_BACKEND`` picks the backend: watsonx (the default), local (the
+    GGUF Granite model on this machine, see :class:`GGUFEmbeddings`) or
+    openrouter.
 
-    Inputs longer than ``EMBEDDING_MAX_INPUT_TOKENS`` are truncated by the
-    service; without this, watsonx rejects the whole request with a 400.
+    Inputs longer than ``EMBEDDING_MAX_INPUT_TOKENS`` are truncated by
+    watsonx; without this, watsonx rejects the whole request with a 400.
 
     Returns:
-        A configured embeddings object (:class:`WatsonxEmbeddings` or
-        :class:`GGUFEmbeddings`) ready to embed text or load a vector store.
+        A configured embeddings object (:class:`WatsonxEmbeddings`,
+        :class:`GGUFEmbeddings` or ``OpenAIEmbeddings`` pointed at OpenRouter)
+        ready to embed text or load a vector store.
 
     Raises:
-        RuntimeError: If ``WATSONX_API_KEY`` or ``WATSONX_PROJECT_ID`` is not
-            set, so the failure names the missing variable instead of
-            surfacing as an opaque authentication error.
+        RuntimeError: If the chosen backend's credentials are not set, so the
+            failure names the missing variable instead of surfacing as an
+            opaque authentication error; or if the local backend is chosen
+            and llama-cpp-python is not installed.
         FileNotFoundError: If the local backend is chosen and the GGUF file
             is missing.
     """
     if EMBEDDING_BACKEND == "local":
         return _load_local_embedding_model()
+    if EMBEDDING_BACKEND == "openrouter":
+        return _load_openrouter_embedding_model()
 
     missing = [
         name

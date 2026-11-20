@@ -48,6 +48,7 @@ WATSONX_API_KEY: str = os.getenv("WATSONX_API_KEY", "")
 WATSONX_PROJECT_ID: str = os.getenv("WATSONX_PROJECT_ID", "")
 # Regional watsonx.ai endpoint; must be the region the project lives in.
 WATSONX_URL: str = os.getenv("WATSONX_URL", "https://eu-de.ml.cloud.ibm.com")
+OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
 
 # Model selection
 # Embedding model (served by watsonx.ai) used to vectorise chunks during
@@ -56,10 +57,22 @@ EMBEDDING_MODEL: str = "ibm/granite-embedding-278m-multilingual"
 # The model's context limit; longer inputs are truncated by watsonx.
 EMBEDDING_MAX_INPUT_TOKENS: int = 512
 # "watsonx" calls the hosted service; "local" runs the same model's open weights
-# on this machine (for retrieval without watsonx credentials). The stored vectors
-# came from the watsonx model, so any replacement must produce vectors in the
-# same space (see src/embed.py).
-EMBEDDING_BACKEND: str = _env_choice("EMBEDDING_BACKEND", "watsonx", ("watsonx", "local"))
+# on this machine (for retrieval without watsonx credentials). Both give Granite
+# vectors. "openrouter" calls OPENROUTER_EMBEDDING_MODEL, a different model, so
+# the store must be re-embedded before it can be searched with it.
+EMBEDDING_BACKEND: str = _env_choice("EMBEDDING_BACKEND", "watsonx", ("watsonx", "local", "openrouter"))
+# OpenRouter speaks the OpenAI embeddings protocol at this address.
+OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+# Any model listed by GET https://openrouter.ai/api/v1/embeddings/models.
+# Changing it means building that model's collection (python -m scripts.reembed).
+OPENROUTER_EMBEDDING_MODEL: str = os.getenv("OPENROUTER_EMBEDDING_MODEL", "nvidia/nemotron-3-embed-1b:free")
+# Texts per request. Free models allow 50 requests a day, so the 310 stored
+# summaries are sent in 5 requests rather than 310.
+OPENROUTER_EMBEDDING_BATCH_SIZE: int = int(os.getenv("OPENROUTER_EMBEDDING_BATCH_SIZE", "64"))
+# One request's time limit, and how often the openai client retries a timeout,
+# connection error, 408, 429 or 5xx (with exponential backoff) before failing.
+OPENROUTER_TIMEOUT_SECONDS: float = float(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "60"))
+OPENROUTER_MAX_RETRIES: int = int(os.getenv("OPENROUTER_MAX_RETRIES", "3"))
 # GGUF build of the model above, run by llama.cpp (no torch). Q8_0 matches the
 # stored vectors at cosine 0.9999; see CONTRIBUTING.md for the download.
 LOCAL_EMBEDDING_GGUF_PATH: str = os.getenv(
