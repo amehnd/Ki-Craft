@@ -1,7 +1,11 @@
-"""How one stored or retrieved chunk is drawn: its detail tabs and compact card.
+"""How one stored or retrieved chunk is drawn, on the Explorer, Compare and Query pages.
 
-Used by the Chunk Explorer, Compare and Query pages. Every function takes a
-chunk dict from the API and draws it; none fetches anything.
+A stored chunk (``GET /v1/documents/{id}/chunks``) and a retrieved one (the
+query stream's ``chunks``) carry the same content fields: ``enhanced_content``,
+``raw_text``, ``tables_html`` and ``image_urls``. ``render_content_tabs`` draws
+those fields the same way on every page; each page adds only its own frame
+around it: the full detail on Explorer, a compact card on Compare, a collapsed
+panel marked "cited" on Query. Nothing here fetches anything.
 """
 
 from __future__ import annotations
@@ -21,11 +25,12 @@ from chunk_data import (
     word_count,
 )
 
+
 def _health_color(score: int) -> str:
     """The Streamlit colour name for a health score: green, orange or red."""
     if score >= 75:
         return "green"
-    elif score >= 50:
+    if score >= 50:
         return "orange"
     return "red"
 
@@ -37,8 +42,77 @@ def _status_badge(present: bool, label: str) -> str:
     return f":red[FAIL] {label}"
 
 
+def _plural(count: int, noun: str) -> str:
+    """``1 figure``, ``2 figures``."""
+    return f"{count} {noun}{'' if count == 1 else 's'}"
+
+
+def _render_text(text: str) -> None:
+    """The original text in a scrolling box, with its word count."""
+    if not text:
+        st.info("No original text in this chunk.")
+        return
+    st.caption(f"{word_count(text)} words, {len(text)} characters")
+    with st.container(height=300):
+        st.text(text)
+
+
+def _render_figures(image_urls: list[str]) -> None:
+    """Each figure, loaded by the browser from the API's image URL."""
+    if not image_urls:
+        st.info("No figures in this chunk.")
+        return
+    for position, url in enumerate(image_urls, 1):
+        st.image(url, width="stretch", caption=f"Figure {position} of this chunk")
+        st.markdown(f"[Open full size]({url})")
+
+
+def _render_tables(tables: list[str]) -> None:
+    """Each table as a DataFrame, or as rendered HTML when pandas cannot read it."""
+    if not tables:
+        st.info("No tables in this chunk.")
+        return
+    for position, html in enumerate(tables, 1):
+        st.markdown(f"**Table {position}**")
+        df = parse_table_html(html)
+        if df is not None:
+            st.dataframe(df, width="stretch")
+        else:
+            st.caption("This table could not be read as rows and columns; shown as HTML.")
+            st.html(html)
+
+
+def render_content_tabs(chunk: dict, with_metadata: bool = False) -> None:
+    """Draw a chunk's summary, original text, figures and tables, one tab each.
+
+    Nothing here is a widget (no text area, no keys), so the same chunk can be
+    drawn twice in one run, as the Query page does while an answer streams.
+
+    Args:
+        chunk: A stored or retrieved chunk dict from the API.
+        with_metadata: Add a tab with the chunk's identifying fields.
+    """
+    images = get_image_urls(chunk)
+    tables = get_tables_html(chunk)
+    names = ["Summary", "Original text", f"Figures ({len(images)})", f"Tables ({len(tables)})"]
+    if with_metadata:
+        names.append("Metadata")
+    tabs = st.tabs(names)
+    with tabs[0]:
+        st.markdown(get_enhanced_content(chunk) or "*No summary.*")
+    with tabs[1]:
+        _render_text(get_raw_text(chunk))
+    with tabs[2]:
+        _render_figures(images)
+    with tabs[3]:
+        _render_tables(tables)
+    if with_metadata:
+        with tabs[4]:
+            st.json(chunk_fields(chunk))
+
+
 def render_detail(chunk: dict) -> None:
-    """Draw one chunk in full: counts, health score, export buttons and a tab per content kind.
+    """Draw one chunk in full for the Chunk Explorer: counts, health, export buttons, content.
 
     Args:
         chunk: One chunk dict from ``GET /v1/documents/{id}/chunks``.
@@ -48,9 +122,7 @@ def render_detail(chunk: dict) -> None:
     tables = get_tables_html(chunk)
     raw = get_raw_text(chunk)
     enhanced = get_enhanced_content(chunk)
-
     score, label = health_score(chunk)
-    color = _health_color(score)
 
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Chunk ID", cid)
@@ -59,7 +131,7 @@ def render_detail(chunk: dict) -> None:
     col4.metric("Raw Chars", len(raw))
     col5.metric("Enhanced Chars", len(enhanced))
 
-    st.markdown(f"### Health Score: {score}/100  --  :{color}[{label}]")
+    st.markdown(f"### Health Score: {score}/100  --  :{_health_color(score)}[{label}]")
     st.progress(score / 100)
 
     qc1, qc2, qc3, qc4 = st.columns(4)
@@ -68,199 +140,48 @@ def render_detail(chunk: dict) -> None:
     qc3.markdown(_status_badge(bool(images), "Images"))
     qc4.markdown(_status_badge(bool(tables), "Tables"))
 
-    col_e1, col_e2, _ = st.columns([1, 1, 6])
-    with col_e1:
+    with st.container(horizontal=True, gap="small"):
         st.download_button(
             "Export JSON",
             data=json.dumps(chunk, indent=2),
             file_name=f"chunk_{cid}.json",
             mime="application/json",
         )
-    with col_e2:
-        export_txt = (
-            f"Chunk {cid}\n\n"
-            f"--- Enhanced ---\n{enhanced}\n\n"
-            f"--- Raw ---\n{raw}"
-        )
         st.download_button(
             "Export TXT",
-            data=export_txt,
+            data=f"Chunk {cid}\n\n--- Enhanced ---\n{enhanced}\n\n--- Raw ---\n{raw}",
             file_name=f"chunk_{cid}.txt",
             mime="text/plain",
         )
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["Enhanced Content", "Raw Text", "Images", "Tables", "Metadata"]
-    )
-
-    with tab1:
-        _render_enhanced_tab(enhanced)
-    with tab2:
-        _render_raw_tab(raw)
-    with tab3:
-        _render_images_tab(images)
-    with tab4:
-        _render_tables_tab(tables)
-    with tab5:
-        _render_metadata_tab(chunk)
-
-
-def _render_enhanced_tab(text: str) -> None:
-    """The summary as Markdown, with its word and character counts."""
-    st.markdown(text)
-
-    wc = word_count(text)
-    cc = len(text)
-
-    col1, col2 = st.columns(2)
-    col1.metric("Words", wc)
-    col2.metric("Characters", cc)
-
-    with st.expander("Show / Hide"):
-        st.markdown(text)
-
-
-def _render_raw_tab(text: str) -> None:
-    """The original text, its counts and a download button."""
-    wc = word_count(text)
-    cc = len(text)
-
-    col1, col2 = st.columns(2)
-    col1.metric("Words", wc)
-    col2.metric("Characters", cc)
-
-    st.text_area(
-        "Raw Text",
-        value=text,
-        height=400,
-        disabled=True,
-        label_visibility="collapsed",
-    )
-
-    st.download_button(
-        "Download", data=text, file_name="raw_text.txt", mime="text/plain"
-    )
-
-
-def _render_images_tab(image_urls: list[str]) -> None:
-    """Show each figure; the browser loads it from the API's image URL."""
-    if not image_urls:
-        st.info("No images found in this chunk.")
-        return
-
-    for i, url in enumerate(image_urls, 1):
-        st.subheader(f"Image {i}")
-        st.image(url, width="stretch")
-        st.markdown(f"[Open full size]({url})")
-
-
-def _render_tables_tab(tables: list[str]) -> None:
-    """Each table as a DataFrame (or raw HTML when it cannot be parsed), with its source."""
-    if not tables:
-        st.info("No tables found in this chunk.")
-        return
-
-    for i, html in enumerate(tables, 1):
-        st.subheader(f"Table {i}")
-        df = parse_table_html(html)
-        if df is not None:
-            st.dataframe(df, width="stretch")
-        else:
-            st.warning(
-                f"Could not parse Table {i} as DataFrame. Showing raw HTML."
-            )
-            st.html(html)
-
-        with st.expander(f"Raw HTML -- Table {i}"):
-            st.code(html, language="html")
-
-
-def _render_metadata_tab(chunk: dict) -> None:
-    """Counts and the chunk's identifying fields."""
-    col1, col2 = st.columns(2)
-    col1.metric("Image Count", len(get_image_urls(chunk)))
-    col2.metric("Table Count", len(get_tables_html(chunk)))
-
-    st.divider()
-    st.json(chunk_fields(chunk))
+    render_content_tabs(chunk, with_metadata=True)
 
 
 def render_chunk_card(chunk: dict) -> None:
-    """Draw a compact view of one chunk for the Compare page: score, counts, content in expanders."""
-    images = get_image_urls(chunk)
-    tables = get_tables_html(chunk)
-    raw = get_raw_text(chunk)
-    enhanced = get_enhanced_content(chunk)
-    score, label = health_score(chunk)
-    color = _health_color(score)
-
+    """Draw a compact view of one chunk for the Compare page: health, counts, content."""
+    score, _ = health_score(chunk)
     st.metric("Health Score", f"{score}/100")
     st.progress(score / 100)
-    st.write(f"**Images:** {len(images)}  |  **Tables:** {len(tables)}")
     st.write(
-        f"**Raw:** {len(raw)} chars  |  **Enhanced:** {len(enhanced)} chars"
+        f"**Raw:** {len(get_raw_text(chunk))} chars  |  "
+        f"**Enhanced:** {len(get_enhanced_content(chunk))} chars"
     )
-
-    with st.expander("Enhanced Content"):
-        st.markdown(enhanced or "*empty*")
-    with st.expander("Raw Text"):
-        st.text(raw or "*empty*")
-    with st.expander(f"Images ({len(images)})"):
-        for i, url in enumerate(images, 1):
-            st.image(url, width=300, caption=f"Image {i}")
-    with st.expander(f"Tables ({len(tables)})"):
-        for i, html in enumerate(tables, 1):
-            df = parse_table_html(html)
-            if df is not None:
-                st.dataframe(df)
-            else:
-                st.html(html)
-    with st.expander("Metadata"):
-        st.json(chunk_fields(chunk))
+    render_content_tabs(chunk, with_metadata=True)
 
 
 def render_retrieved_chunk(payload: dict, cited: bool) -> None:
-    """Draw one retrieved chunk as a collapsed panel with its content in tabs.
-
-    Nothing here is a widget (no text area, no keys), so the same chunk can
-    be drawn twice in one run: once when retrieval arrives, again with its
-    citation mark when the answer is done.
+    """Draw one retrieved chunk as a collapsed panel, marked when the answer cites it.
 
     Args:
         payload: One entry of the API's ``chunks`` list.
         cited: Whether the answer cites this chunk.
     """
-    raw_text = payload.get("raw_text", "")
-    tables = payload.get("tables_html", [])
-    image_urls = payload.get("image_urls", [])
-    enhanced = payload.get("enhanced_content", "")
-
-    parts = [f"C{payload.get('chunk_id')}", payload.get("source") or "unknown document"]
-    parts.append(f"{len(image_urls)} figure{'s' if len(image_urls) != 1 else ''}")
-    parts.append(f"{len(tables)} table{'s' if len(tables) != 1 else ''}")
+    parts = [
+        f"C{payload.get('chunk_id')}",
+        payload.get("source") or "unknown document",
+        _plural(len(get_image_urls(payload)), "figure"),
+        _plural(len(get_tables_html(payload)), "table"),
+    ]
     label = " · ".join(parts) + ("  :green[cited]" if cited else "")
-
     with st.expander(label):
-        tab_e, tab_r, tab_i, tab_t = st.tabs(["Summary", "Original text", "Figures", "Tables"])
-        with tab_e:
-            st.markdown(enhanced)
-        with tab_r:
-            st.caption(f"{len(raw_text.split())} words")
-            with st.container(height=250):
-                st.text(raw_text)
-        with tab_i:
-            if not image_urls:
-                st.info("No figures in this chunk.")
-            for j, url in enumerate(image_urls):
-                st.image(url, width=400, caption=f"Figure {j + 1} of this chunk")
-        with tab_t:
-            if not tables:
-                st.info("No tables in this chunk.")
-            for j, html in enumerate(tables):
-                st.markdown(f"**Table {j + 1}**")
-                df = parse_table_html(html)
-                if df is not None:
-                    st.dataframe(df, width="stretch")
-                else:
-                    st.warning("Could not parse table.")
-                    st.code(html, language="html")
+        render_content_tabs(payload)

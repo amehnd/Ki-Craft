@@ -142,7 +142,12 @@ def parse_table_html(html: str) -> Optional[pd.DataFrame]:
 
 
 def build_chunk_df(data: list[dict]) -> pd.DataFrame:
-    """One row per chunk with its id, figure and table counts, text lengths and health score."""
+    """One row per chunk with its id, figure and table counts, text lengths and health score.
+
+    The one per-chunk table of the dashboard: the Explorer lists it, the
+    Analytics page charts it, and ``components/dataset.py:render_totals``
+    sums it for both.
+    """
     rows = []
     for c in data:
         cid = c.get("chunk_id", "?")

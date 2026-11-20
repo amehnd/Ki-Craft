@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import streamlit as st
 
-from chunk_data import build_chunk_df, get_enhanced_content, get_image_urls, get_raw_text, get_tables_html
+from chunk_data import build_chunk_df
 from components.chunk_view import render_detail
-from components.dataset import require_dataset
+from components.dataset import render_totals, require_dataset
 from components.filters import apply_filters, render_filters
 
 _PURPOSE = (
-    "Dataset-wide metrics, then open any chunk on its own: raw OCR text, the "
-    "AI-generated summary, decoded images, parsed tables, full metadata and a "
-    "0-100 health score. Filter by search text, images, tables, raw text, "
-    "enhanced content or chunk ID."
+    "The document's totals, then open any chunk on its own: the text extracted "
+    "from the PDF, the summary written at ingestion, its figures and tables, its "
+    "metadata and a 0-100 health score. Filter by search text, figures, tables, "
+    "original text, summary or chunk ID."
 )
 
 
@@ -26,40 +26,12 @@ def render() -> None:
     st.header("Chunk Explorer")
     page_explorer(data)
 
-def render_dashboard(data: list[dict]) -> None:
-    """Draw the document-wide totals: chunks, figures, tables and average text lengths."""
-    total = len(data)
-    total_images = sum(len(get_image_urls(c)) for c in data)
-    total_tables = sum(len(get_tables_html(c)) for c in data)
-    chunks_with_images = sum(1 for c in data if get_image_urls(c))
-    chunks_with_tables = sum(1 for c in data if get_tables_html(c))
-    avg_raw = (
-        sum(len(get_raw_text(c)) for c in data) / total if total else 0
-    )
-    avg_enh = (
-        sum(len(get_enhanced_content(c)) for c in data) / total if total else 0
-    )
-
-    cols = st.columns(7)
-    metrics = [
-        ("Total Chunks", total),
-        ("Total Images", total_images),
-        ("Total Tables", total_tables),
-        ("Chunks w/ Images", chunks_with_images),
-        ("Chunks w/ Tables", chunks_with_tables),
-        ("Avg Raw Length", f"{avg_raw:.0f}"),
-        ("Avg Enhanced Length", f"{avg_enh:.0f}"),
-    ]
-    for col, (label, value) in zip(cols, metrics):
-        col.metric(label, value)
-
 
 def render_chunk_list(data: list[dict]) -> None:
     """Draw the chunk table; selecting a row opens that chunk in the detail panel."""
     st.subheader("Chunks")
-    df = build_chunk_df(data)
     selection = st.dataframe(
-        df,
+        build_chunk_df(data),
         width="stretch",
         hide_index=True,
         column_config={
@@ -85,7 +57,7 @@ def render_chunk_list(data: list[dict]) -> None:
 
 def page_explorer(data: list[dict]) -> None:
     """Draw the totals, the filtered chunk list and the opened chunk side by side."""
-    render_dashboard(data)
+    render_totals(build_chunk_df(data))
 
     filtered = apply_filters(data)
     st.info(f"Showing {len(filtered)} of {len(data)} chunks")

@@ -1,13 +1,15 @@
-"""Choosing the document that the Explorer, Compare and Analytics pages work on.
+"""The document that the Explorer, Compare and Analytics pages work on.
 
 The picker sits in the sidebar of those three pages. ``require_dataset`` is
 what each of them calls first: it draws the picker and returns the loaded
 document's chunks, or draws an empty state with one button per document and
-returns None.
+returns None. ``render_totals`` draws the document's totals, the same on the
+Explorer and Analytics pages.
 """
 
 from __future__ import annotations
 
+import pandas as pd
 import streamlit as st
 
 from api_client import API_BASE_URL
@@ -81,3 +83,24 @@ def require_dataset(title: str, purpose: str) -> list[dict] | None:
     if data is None:
         _render_no_dataset(title, purpose)
     return data
+
+
+def render_totals(df: pd.DataFrame) -> None:
+    """Draw a document's totals: chunks, figures, tables and average text lengths.
+
+    Args:
+        df: The document's per-chunk table from ``chunk_data.build_chunk_df``.
+    """
+    if df.empty:
+        return
+    metrics = [
+        ("Total Chunks", len(df)),
+        ("Total Images", int(df["Images"].sum())),
+        ("Total Tables", int(df["Tables"].sum())),
+        ("Chunks w/ Images", int((df["Images"] > 0).sum())),
+        ("Chunks w/ Tables", int((df["Tables"] > 0).sum())),
+        ("Avg Raw Length", f"{df['Raw Len'].mean():.0f}"),
+        ("Avg Enhanced Length", f"{df['Enh Len'].mean():.0f}"),
+    ]
+    for col, (label, value) in zip(st.columns(len(metrics)), metrics):
+        col.metric(label, value)
