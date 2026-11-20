@@ -176,7 +176,7 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 ## Testing
 
-**Fixture.** A pytest function that prepares something a test needs and cleans it up afterwards. A test asks for it by naming it as an argument. Here `backend` and `client` in `tests/test_api.py`.
+**Fixture.** A pytest function that prepares something a test needs and cleans it up afterwards. A test asks for it by naming it as an argument. Here `backend` and `client` in `tests/api/conftest.py`.
 
 **Monkeypatch.** pytest's built-in fixture for temporarily replacing an attribute, such as a function inside a module, for one test. It puts the original back when the test ends. Here it swaps the Chroma loader and the LLM builders for fakes.
 
@@ -186,6 +186,6 @@ Plain-language explanations of the technical terms used in this repository. Each
 
 **TestClient.** FastAPI's in-process HTTP client, built on `httpx`. It sends real requests to the app without starting a server or opening a port. Used inside `with`, it also runs the app's lifespan.
 
-**Characterization test.** A test that records what the code does now, including behaviour known to be wrong, so a refactor can prove it changed nothing. When the defect is fixed, the test is updated in the same change. The known-defect tests in `tests/test_api.py` (a 200 for a failing store, an apology for a failing provider, a 500 for an unknown model) were examples until commit 6a fixed those status codes.
+**Characterization test.** A test that records what the code does now, including behaviour known to be wrong, so a refactor can prove it changed nothing. When the defect is fixed, the test is updated in the same change. The known-defect tests in the API tests (now `tests/api/`) (a 200 for a failing store, an apology for a failing provider, a 500 for an unknown model) were examples until commit 6a fixed those status codes.
 
 **Marker.** A label on a test (`@pytest.mark.live`) that lets a run select it or leave it out with `-m`. Markers are registered in `pyproject.toml`. Here `live` tests are skipped unless the run uses `-m live`.
