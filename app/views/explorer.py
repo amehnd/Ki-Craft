@@ -27,10 +27,29 @@ def render() -> None:
     page_explorer(data)
 
 
+def _open_selected_row(data: list[dict]) -> None:
+    """Open the chunk of the table row just selected (an ``on_select`` callback)."""
+    rows = st.session_state.chunk_table.selection.rows
+    if rows:
+        st.session_state.selected_chunk_id = data[rows[0]].get("chunk_id")
+
+
+def _open_picked_chunk() -> None:
+    """Open the chunk just picked in the "Pick a chunk" box (an ``on_change`` callback)."""
+    if st.session_state.chunk_selector is not None:
+        st.session_state.selected_chunk_id = st.session_state.chunk_selector
+
+
 def render_chunk_list(data: list[dict]) -> None:
-    """Draw the chunk table; selecting a row opens that chunk in the detail panel."""
+    """Draw the chunk table; selecting a row opens that chunk in the detail panel.
+
+    Both ways to open a chunk, a table row and the "Pick a chunk" box, set
+    ``selected_chunk_id`` in a callback. Streamlit runs a callback before the
+    rerun the click causes, so the detail panel shows the chunk in that same
+    run, and whichever was used last wins.
+    """
     st.subheader("Chunks")
-    selection = st.dataframe(
+    st.dataframe(
         build_chunk_df(data),
         width="stretch",
         hide_index=True,
@@ -47,12 +66,11 @@ def render_chunk_list(data: list[dict]) -> None:
                 width="small",
             ),
         },
-        on_select="rerun",
+        key="chunk_table",
+        # st.dataframe passes no arguments to its callback, so the rows are bound here.
+        on_select=lambda: _open_selected_row(data),
         selection_mode="single-row",
     )
-    if selection and selection.selection.rows:
-        idx = selection.selection.rows[0]
-        st.session_state.selected_chunk_id = data[idx].get("chunk_id")
 
 
 def page_explorer(data: list[dict]) -> None:
@@ -72,7 +90,7 @@ def page_explorer(data: list[dict]) -> None:
         render_chunk_list(filtered)
         cid_filter = st.session_state.chunk_id_filter.strip()
         if not cid_filter:
-            sel = st.selectbox(
+            st.selectbox(
                 "Select chunk",
                 options=[c.get("chunk_id") for c in filtered],
                 format_func=lambda x: f"Chunk {x}",
@@ -80,10 +98,8 @@ def page_explorer(data: list[dict]) -> None:
                 label_visibility="collapsed",
                 index=None,
                 placeholder="Pick a chunk...",
+                on_change=_open_picked_chunk,
             )
-            if sel is not None:
-                st.session_state.selected_chunk_id = sel
-                st.rerun()
 
     with detail_col:
         selected_id = st.session_state.selected_chunk_id
