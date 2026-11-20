@@ -14,6 +14,7 @@ from langchain_core.embeddings import Embeddings
 from langsmith import traceable
 
 from config.settings import (
+    CHROMA_COLLECTION_METADATA,
     CHROMA_PERSIST_DIR,
     RETRIEVAL_FETCH_K,
     RETRIEVAL_K,
@@ -27,20 +28,26 @@ from src.logger import get_logger
 logger = get_logger(__name__)
 
 
-def load_vector_store(embedding_model: Embeddings) -> Chroma:
-    """Load the persisted Chroma vector store.
+def load_vector_store(embedding_model: Embeddings, persist_directory: str = CHROMA_PERSIST_DIR) -> Chroma:
+    """Open the Chroma store, creating it if the folder holds none.
+
+    The API reads through it and ingestion writes through it, so both open
+    the same collection the same way. ``CHROMA_COLLECTION_METADATA`` (cosine
+    distance) only takes effect when the collection is first created.
 
     Args:
         embedding_model: The embedding model to query with (must match the
             one used during ingestion).
+        persist_directory: Folder of the Chroma store.
 
     Returns:
         The loaded Chroma vector store.
     """
-    logger.info("Loading vector store from %s", CHROMA_PERSIST_DIR)
+    logger.info("Loading vector store from %s", persist_directory)
     return Chroma(
-        persist_directory=CHROMA_PERSIST_DIR,
+        persist_directory=persist_directory,
         embedding_function=embedding_model,
+        collection_metadata=CHROMA_COLLECTION_METADATA,
     )
 
 

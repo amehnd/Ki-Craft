@@ -5,9 +5,12 @@ original text, tables and figures (base64). :func:`documents_from_export`
 writes each figure to a file under the images folder and returns one
 LangChain ``Document`` per chunk with flat metadata: ``source``, ``chunk_id``,
 ``raw_text``, ``tables_html``, ``image_paths``, ``has_table``, ``has_image``.
-:func:`create_vector_store` embeds those Documents into Chroma.
-:func:`run_complete_ingestion_pipeline` runs every step for one PDF;
-:func:`store_export` stores an export that already exists, with no summarising.
+
+:func:`store_export` is the one way records reach the store: it checks an
+export, embeds its summaries and writes the records and figure files.
+:func:`run_complete_ingestion_pipeline` turns one PDF into an export and then
+hands it to :func:`store_export`, so a PDF and an existing export are stored
+the same way.
 """
 
 from __future__ import annotations
@@ -23,7 +26,6 @@ from langchain_core.documents import Document
 from langsmith import traceable
 
 from config.settings import (
-    CHROMA_COLLECTION_METADATA,
     CHROMA_PERSIST_DIR,
     ENHANCEMENT_BACKEND,
     IMAGES_DIR,
@@ -35,6 +37,7 @@ from src.ingestion.enrich import summarise_chunks
 from src.ingestion.export import export_chunks_to_json
 from src.ingestion.extract import document_context, partition_document, remove_page_decoration
 from src.logger import get_logger
+from src.retrieval.search import load_vector_store
 
 logger = get_logger(__name__)
 
@@ -86,29 +89,6 @@ def documents_from_export(
             )
         )
     return documents
-
-
-@traceable(run_type="chain", name="CreateVectorStore")
-def create_vector_store(
-    documents: list[Document],
-    persist_directory: str = CHROMA_PERSIST_DIR,
-) -> Chroma:
-    """Embed Documents and add them to the Chroma store in ``persist_directory``.
-
-    Args:
-        documents: Documents to embed; ``page_content`` is what gets embedded.
-        persist_directory: Folder of the Chroma store; created if missing.
-
-    Returns:
-        The Chroma store holding the new records.
-    """
-    logger.info("Embedding %d chunks into %s", len(documents), persist_directory)
-    return Chroma.from_documents(
-        documents=documents,
-        embedding=load_embedding_model(),
-        persist_directory=persist_directory,
-        collection_metadata=CHROMA_COLLECTION_METADATA,
-    )
 
 
 def _check_export(export: list, source: str) -> None:
@@ -163,11 +143,7 @@ def store_export(
     _check_export(export, source)
 
     embedding = load_embedding_model()
-    db = Chroma(
-        persist_directory=persist_directory,
-        embedding_function=embedding,
-        collection_metadata=CHROMA_COLLECTION_METADATA,
-    )
+    db = load_vector_store(embedding, persist_directory)
     old_ids = db.get(where={"source": source}, include=[])["ids"]
     if old_ids and not replace:
         raise FileExistsError(f"{persist_directory} already holds {source}; pass --replace to replace it")
@@ -202,9 +178,12 @@ def run_complete_ingestion_pipeline(
     export_dir: str | Path = JSON_EXPORT_DIR,
     backend: str = ENHANCEMENT_BACKEND,
 ) -> Chroma:
-    """Ingest one PDF: partition, drop page decoration, chunk, summarise, export, embed.
+    """Ingest one PDF: partition, drop page decoration, chunk, summarise, export, store.
 
     The document's name (``source``) is the PDF file name without its suffix.
+    The export is written first and then stored by :func:`store_export`. If
+    storing fails, the export stays on disk, so the slow summaries are not
+    lost: store it with ``python -m scripts.ingest json/<source>.json``.
 
     Args:
         pdf_path: The PDF to ingest.
@@ -218,7 +197,8 @@ def run_complete_ingestion_pipeline(
 
     Raises:
         FileExistsError: If ``<export_dir>/<source>.json`` already exists, which
-            means the document was ingested before.
+            means the document was ingested before, or the store already
+            holds ``source``.
         SummaryError: If a chunk's summary fails; nothing is written then.
     """
     source = Path(pdf_path).stem
@@ -231,7 +211,5 @@ def run_complete_ingestion_pipeline(
     chunks = create_chunks_by_title(remove_page_decoration(elements))
     summarised = summarise_chunks(chunks, backend, document)
     export_path.parent.mkdir(parents=True, exist_ok=True)
-    export = export_chunks_to_json(summarised, filename=str(export_path))
-    db = create_vector_store(documents_from_export(export, source, images_dir), persist_directory)
-    logger.info("Stored %d chunks from %s", len(export), pdf_path)
-    return db
+    export_chunks_to_json(summarised, export_path)
+    return store_export(export_path, persist_directory, images_dir)

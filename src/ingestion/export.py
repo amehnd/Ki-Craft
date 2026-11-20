@@ -1,14 +1,16 @@
 """Export processed chunks to JSON.
 
-Writes the summarised chunks to ``<source>.json``: each chunk's summary and its
-original text, tables and figures (base64). The export can rebuild the store
-without summarising again (``python -m scripts.ingest json/<source>.json``)
-and is what the dashboard's dataset browser shows.
+Writes the summarised chunks to ``json/<source>.json``: each chunk's summary
+and its original text, tables and figures (base64). Summarising is the slow,
+paid step, so the export keeps its result: ``src/ingestion/pipeline.py:store_export``
+stores records from it, and it can rebuild the store without summarising again
+(``python -m scripts.ingest json/<source>.json``).
 """
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from langchain_core.documents import Document
@@ -18,10 +20,7 @@ from src.logger import get_logger
 logger = get_logger(__name__)
 
 
-def export_chunks_to_json(
-    chunks: list[Document],
-    filename: str = "chunks_export.json",
-) -> list[dict]:
+def export_chunks_to_json(chunks: list[Document], filename: str | Path) -> list[dict]:
     """Export processed LangChain Documents to a clean JSON file.
 
     Each entry contains ``chunk_id``, ``enhanced_content`` and metadata with
@@ -29,7 +28,7 @@ def export_chunks_to_json(
 
     Args:
         chunks: List of LangChain Documents.
-        filename: Output JSON file path.
+        filename: Output JSON file path, ``json/<source>.json`` in the pipeline.
 
     Returns:
         The exported data as a list of dicts.

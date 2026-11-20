@@ -226,11 +226,11 @@ Ingestion is not needed to use the five documents that ship with the repository.
 - It calls a vision model once for every chunk with tables or figures. `--backend huggingface` (the default) uses GLM-4.5V on the Hugging Face router, which needs `HF_TOKEN` and credit. `--backend local` uses a model on your Mac through `mlx_vlm.server`; see below.
 - It calls watsonx once per chunk for the embedding.
 - It writes to the tracked store in `dbv2/chroma_db`, so it changes files that git tracks.
-- One script, `scripts/ingest.py`, takes either input. Both store records the same way (`src/ingestion/pipeline.py:documents_from_export`): each figure becomes a file in `dbv2/images`, and the record holds its path and a `source` name.
+- One script, `scripts/ingest.py`, takes either input. Both are stored by the same function, `src/ingestion/pipeline.py:store_export`: a PDF is first turned into an export, then stored like any other. Each figure becomes a file in `dbv2/images`, and the record holds its path and a `source` name.
 
 | Input | What it does |
 |---|---|
-| a PDF, or a folder of PDFs | Parses, chunks, summarises, writes the export to `json/<pdf name>.json`, then stores the records. It skips a PDF whose export already exists |
+| a PDF, or a folder of PDFs | Parses, chunks, summarises, writes the export to `json/<pdf name>.json`, then stores it as below. It skips a PDF whose export already exists, and refuses one the store already holds. If storing fails, the export stays, so `python -m scripts.ingest json/<pdf name>.json` finishes the job without summarising again |
 | a `json/<name>.json` export | Embeds the existing summaries and stores the records, with no summarising. It refuses a document the store already holds unless `--replace` is given; replacing embeds first and only then removes the old records and figures |
 
 PDF parsing needs programs that no Python dependency file installs: poppler reads PDFs, tesseract does OCR, libmagic detects file types and pandoc converts formats.

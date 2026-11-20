@@ -2,6 +2,7 @@
 
 import base64
 import json
+from pathlib import Path
 
 import langsmith
 import pytest
@@ -80,33 +81,34 @@ def test_existing_export_stops_before_any_work(tmp_path, monkeypatch):
         run_complete_ingestion_pipeline("data/ne555.pdf", export_dir=tmp_path)
 
 
-def test_pipeline_writes_export_figures_and_records(tmp_path, monkeypatch):
-    stored = {}
+def test_pipeline_writes_the_export_then_stores_it(tmp_path, monkeypatch):
+    """A PDF is stored through store_export, the same path as an existing export."""
+    seen = {}
     monkeypatch.setattr(pipeline, "partition_document", lambda path: ["element"])
     monkeypatch.setattr(pipeline, "create_chunks_by_title", lambda elements: ["chunk"])
     monkeypatch.setattr(pipeline, "document_context", lambda elements, source: f"{source}: header")
     monkeypatch.setattr(pipeline, "remove_page_decoration", lambda elements: elements)
     monkeypatch.setattr(
         pipeline, "summarise_chunks",
-        lambda chunks, backend, document: stored.update(document=document) or ["summarised"],
+        lambda chunks, backend, document: seen.update(document=document) or ["summarised"],
     )
     monkeypatch.setattr(
         pipeline, "export_chunks_to_json",
-        lambda docs, filename: (open(filename, "w").write("[]"), _export())[1],
+        lambda docs, filename: Path(filename).write_text(json.dumps(_export())),
     )
-    monkeypatch.setattr(
-        pipeline, "create_vector_store",
-        lambda docs, persist_directory: stored.update(docs=docs, dir=persist_directory) or "db",
-    )
+    monkeypatch.setattr(pipeline, "load_embedding_model", _Embedder)
 
-    db = run_complete_ingestion_pipeline(
-        "data/ne555.pdf", persist_directory="store", images_dir=tmp_path / "img", export_dir=tmp_path / "json"
+    run_complete_ingestion_pipeline(
+        "data/ne555.pdf",
+        persist_directory=str(tmp_path / "store"),
+        images_dir=tmp_path / "img",
+        export_dir=tmp_path / "json",
     )
-    assert db == "db"
     assert (tmp_path / "json" / "ne555.json").exists()
-    assert stored["dir"] == "store"
-    assert stored["document"] == "ne555: header"
-    assert [d.metadata["source"] for d in stored["docs"]] == ["ne555", "ne555"]
+    assert seen["document"] == "ne555: header"
+    records = _records(tmp_path)
+    assert records["sources"] == ["ne555", "ne555"]
+    assert records["documents"] == ["summary one", "summary two"]
     assert (tmp_path / "img" / "ne555_c2_img0.jpg").read_bytes() == JPEG
 
 
