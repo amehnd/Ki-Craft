@@ -18,10 +18,10 @@ ingestion pipeline (when creating the vector store) and the retrieval path
 
 A query must be embedded into the same vector space as the stored vectors, or
 its distances to them mean nothing. Two separately trained models almost never
-share a space, even with the same number of dimensions, so changing the model
-means re-embedding the store. The watsonx and local backends give the same
-vectors: the GGUF Q8_0 file scores cosine 0.9999 against the stored watsonx
-vectors. To check another
+share a space, even with the same number of dimensions, so each model's
+vectors live in their own Chroma collection (see :func:`collection_name`). The
+watsonx and local backends share Granite's collection: the GGUF Q8_0 file
+scores cosine 0.9999 against the stored watsonx vectors. To check another
 candidate for the same space, embed some stored summaries with it and compare
 each with its stored vector: a cosine near 1.0 means the same space.
 
@@ -32,6 +32,7 @@ so vector length does not affect ranking for any backend.
 
 from __future__ import annotations
 
+import re
 import threading
 from pathlib import Path
 
@@ -40,6 +41,7 @@ from langchain_ibm import WatsonxEmbeddings
 from langchain_openai import OpenAIEmbeddings
 
 from config.settings import (
+    CHROMA_COLLECTION_METADATA,
     EMBEDDING_BACKEND,
     EMBEDDING_MAX_INPUT_TOKENS,
     EMBEDDING_MODEL,
@@ -154,6 +156,54 @@ def embedding_model_id() -> str:
     ``EMBEDDING_MODEL``; OpenRouter returns ``OPENROUTER_EMBEDDING_MODEL``.
     """
     return OPENROUTER_EMBEDDING_MODEL if EMBEDDING_BACKEND == "openrouter" else EMBEDDING_MODEL
+
+
+# The original store's collection, made by Granite, keeps LangChain's default
+# name, so adding collections for other models renamed nothing.
+GRANITE_COLLECTION = "langchain"
+
+
+def vector_space(model_id: str) -> str:
+    """Return the model behind ``model_id``, without an OpenRouter variant suffix.
+
+    ``nvidia/nemotron-3-embed-1b:free`` and ``nvidia/nemotron-3-embed-1b`` are
+    the same model at two price tiers, so they give the same vectors.
+    """
+    return model_id.split(":", 1)[0]
+
+
+def collection_name(model_id: str | None = None) -> str:
+    """Return the Chroma collection that holds ``model_id``'s vectors.
+
+    Ingestion and retrieval both call this, so they always agree on which
+    collection belongs to the configured model.
+
+    Args:
+        model_id: An embedding model id; the configured one when omitted.
+
+    Returns:
+        ``langchain`` for Granite (the original collection); otherwise the
+        model id with every character Chroma does not allow in a name turned
+        into ``-``, for example ``nvidia-nemotron-3-embed-1b``.
+    """
+    space = vector_space(model_id or embedding_model_id())
+    if space == EMBEDDING_MODEL:
+        return GRANITE_COLLECTION
+    return re.sub(r"[^A-Za-z0-9._-]", "-", space)
+
+
+def collection_metadata() -> dict:
+    """Return the metadata a new collection is created with for the configured model.
+
+    ``embedding_model`` lets :func:`src.retrieval.search.load_vector_store`
+    refuse to search the collection with another model. ``embedding_backend``
+    records which service wrote it, for information only.
+    """
+    return {
+        **CHROMA_COLLECTION_METADATA,
+        "embedding_model": vector_space(embedding_model_id()),
+        "embedding_backend": EMBEDDING_BACKEND,
+    }
 
 
 def load_embedding_model() -> Embeddings:

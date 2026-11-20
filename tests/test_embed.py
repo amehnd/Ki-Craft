@@ -248,3 +248,26 @@ def test_openrouter_rate_limit_is_retried_then_succeeds(openrouter_backend, monk
     assert embed.load_embedding_model().embed_query("q") == [0.6, 0.8]
     assert len(seen) == 2
 
+
+def test_granite_keeps_the_original_collection(monkeypatch):
+    for backend in ("watsonx", "local"):
+        monkeypatch.setattr(embed, "EMBEDDING_BACKEND", backend)
+        assert embed.collection_name() == "langchain"
+
+
+def test_other_models_get_a_collection_named_after_them(openrouter_backend):
+    assert embed.collection_name() == "vendor-embed-model"
+    assert embed.collection_name("nvidia/nemotron-3.5-embed-8b") == "nvidia-nemotron-3.5-embed-8b"
+
+
+def test_free_and_paid_variants_share_a_collection():
+    assert embed.collection_name("vendor/model:free") == embed.collection_name("vendor/model")
+    assert embed.vector_space("vendor/model:free") == "vendor/model"
+
+
+def test_collection_metadata_records_the_model(openrouter_backend):
+    assert embed.collection_metadata() == {
+        "hnsw:space": "cosine",
+        "embedding_model": "vendor/embed-model",
+        "embedding_backend": "openrouter",
+    }

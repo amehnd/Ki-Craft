@@ -59,7 +59,7 @@ EMBEDDING_MAX_INPUT_TOKENS: int = 512
 # "watsonx" calls the hosted service; "local" runs the same model's open weights
 # on this machine (for retrieval without watsonx credentials). Both give Granite
 # vectors. "openrouter" calls OPENROUTER_EMBEDDING_MODEL, a different model, so
-# the store must be re-embedded before it can be searched with it.
+# its vectors live in their own collection of the store (see src/embed.py).
 EMBEDDING_BACKEND: str = _env_choice("EMBEDDING_BACKEND", "watsonx", ("watsonx", "local", "openrouter"))
 # OpenRouter speaks the OpenAI embeddings protocol at this address.
 OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
@@ -211,4 +211,7 @@ CORS_ALLOWED_ORIGINS: list[str] = [
 ]
 
 # Vector store settings
+# Every collection is created with cosine distance. The store holds one
+# collection per embedding model; src/embed.py names it and adds the model to
+# this metadata (collection_name, collection_metadata).
 CHROMA_COLLECTION_METADATA: dict = {"hnsw:space": "cosine"}
