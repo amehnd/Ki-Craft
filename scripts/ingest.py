@@ -27,12 +27,9 @@ are environment variables; see the enhancement settings in config/settings.py.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import time
 from pathlib import Path
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config.settings import (
     CHROMA_PERSIST_DIR,
