@@ -7,6 +7,12 @@
 # Build:   docker build -t multimodal-rag-api .
 # Run:     docker run --rm -p 8000:8000 --env-file .env multimodal-rag-api
 #
+# The default image embeds through an API only: watsonx.ai (EMBEDDING_BACKEND=
+# watsonx, the default) or OpenRouter (EMBEDDING_BACKEND=openrouter, with
+# OPENROUTER_API_KEY). Both clients are in api/requirements.txt, so no model
+# weights and no ML framework are installed. EMBEDDING_BACKEND=local fails at
+# startup with a message saying how to get it.
+#
 # Local embeddings (no watsonx credentials, no torch):
 #          docker build --build-arg EMBEDDING_BACKEND=local -t multimodal-rag-api:local .
 # This compiles llama-cpp-python and bakes the pinned GGUF Granite model into
@@ -50,7 +56,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Backend-only dependencies (ingestion/dashboard libs stay out of the image).
-# In the default build embeddings are a watsonx.ai API call, so no ML framework
+# In the default build embeddings are a watsonx.ai or OpenRouter API call, so no ML framework
 # runs in this image; the local build adds only llama.cpp, never torch.
 # Copy requirements first so layer caching kicks in on code-only changes.
 COPY api/requirements.txt api/requirements.txt
